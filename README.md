@@ -20,7 +20,7 @@ Generate beautiful, minimalist map posters for any city in the world.
 | Australia    | Melbourne      | forest          | <img src="posters/melbourne_forest_20260118_153446.png" width="250"> |
 | UAE          | Dubai          | midnight_blue   | <img src="posters/dubai_midnight_blue_20260118_140807.png" width="250"> |
 | USA          | Seattle        | emerald         | <img src="posters/seattle_emerald_20260124_162244.png" width="250"> |
-| Vietnam      | Hoi An         | Mohe Subaraya light | <img src="hoi_an_mohe_subaraya_light_20260205_195949.png"> |
+| Vietnam      | Hoi An         | Mohe Subaraya light | <img src="posters/hoi_an_mohe_subaraya_light_20260205_195949.png"> |
 
 ## Installation
 
