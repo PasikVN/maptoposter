@@ -1,5 +1,7 @@
 # City Map Poster Generator
 
+forked from originalankur/maptoposter
+
 Generate beautiful, minimalist map posters for any city in the world.
 
 ## Examples
