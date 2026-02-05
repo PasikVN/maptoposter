@@ -578,7 +578,11 @@ def create_poster(
 
         # 4. Fetch railways
         pbar.set_description("Downloading railways")
-        railways = fetch_features(point, compensated_dist, tags={"railway": ["rail","tram"]}, name="railways")
+        railways = ox.graph_from_point(point, 
+                            compensated_dist,  
+                            custom_filter='["railway"~"rail|light_rail"]', 
+                            retain_all=True,
+                            simplify=True)
         pbar.update(1)
 
     print("✓ All data retrieved successfully!")
@@ -700,11 +704,29 @@ def create_poster(
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
         
-    if railways is not None and not railways.empty:
+    if railways is None or len(railways) == 0:
+        print(f"❌ Résultat vide : Aucun réseau ferroviaire trouvé à {city}.")
+    else:
         try:
-            railways.plot(ax=ax, color=THEME['railway'], linewidth=0.6, zorder=6)
-        except Exception:
-            print("No [railway] tag in theme...")
+            rail_proj = ox.project_graph(railways)
+            ox.plot_graph(rail_proj, ax=ax, 
+                                    node_size=0, 
+                                    edge_color=THEME['railway'], 
+                                    edge_linewidth=0.6,
+                                    show=False,
+                                    close=False,)
+            ax.set_aspect("equal", adjustable="box")
+            ax.set_xlim(crop_xlim)
+            ax.set_ylim(crop_ylim)  
+
+            
+        except ValueError:
+            # C'est l'erreur la plus courante quand OSMnx ne trouve "No data elements"
+            print(f"❌ Aucun rail trouvé : La requête OSMnx n'a renvoyé aucune donnée pour '{city}'.")
+
+        except Exception as e:
+            # Pour attraper les autres problèmes (connexion internet, nom de ville inconnu, etc.)
+            print(f"⚠️ Une erreur inattendue est survenue : {e}")
     
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")

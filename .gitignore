@@ -24,6 +24,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .cache/*
+fonts/cache/*
 
 # Package manager
 uv.lock
@@ -33,3 +34,5 @@ test_venv/
 htmlcov/
 .coverage
 .pytest_cache/
+posters/perso
+posters/berne_noir_20260128_104222.png
