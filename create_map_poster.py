@@ -207,7 +207,7 @@ def load_theme(theme_name="terracotta"):
 
     with open(theme_file, "r", encoding=FILE_ENCODING) as f:
         theme = json.load(f)
-        print(f"✓ Loaded theme: {theme.get('name', theme_name)}")
+        print(f"✔ Loaded theme: {theme.get('name', theme_name)}")
         if "description" in theme:
             print(f"  {theme['description']}")
         return theme
@@ -330,7 +330,7 @@ def get_coordinates(city, country):
     coords = f"coords_{city.lower()}_{country.lower()}"
     cached = cache_get(coords)
     if cached:
-        print(f"✓ Using cached coordinates for {city}, {country}")
+        print(f"✔ Using cached coordinates for {city}, {country}")
         return cached
 
     print("Looking up coordinates...")
@@ -363,10 +363,10 @@ def get_coordinates(city, country):
         # Use getattr to safely access address (helps static analyzers)
         addr = getattr(location, "address", None)
         if addr:
-            print(f"✓ Found: {addr}")
+            print(f"✔ Found: {addr}")
         else:
-            print("✓ Found location (address not available)")
-        print(f"✓ Coordinates: {location.latitude}, {location.longitude}")
+            print("✔ Found location (address not available)")
+        print(f"✔ Coordinates: {location.latitude}, {location.longitude}")
         try:
             cache_set(coords, (location.latitude, location.longitude))
         except CacheError as e:
@@ -430,7 +430,7 @@ def fetch_graph(point, dist, ntype='all') -> MultiDiGraph | None:
     graph = f"graph_{lat}_{lon}_{dist}"
     cached = cache_get(graph)
     if cached is not None:
-        print("✓ Using cached street network")
+        print("✔ Using cached street network")
         return cast(MultiDiGraph, cached)
 
     try:           
@@ -469,7 +469,7 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     features = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
     cached = cache_get(features)
     if cached is not None:
-        print(f"✓ Using cached {name}")
+        print(f"✔ Using cached {name}")
         return cast(GeoDataFrame, cached)
 
     try:
@@ -500,6 +500,7 @@ def create_poster(
     fonts=None,
     fast_mode=False,
 	include_oceans=True,
+    include_railways=True,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -520,7 +521,8 @@ def create_poster(
         display_city: Optional override for city name
         fonts:
         fast_mode:
-        include_oceans:
+        include_oceans: adds ocean and sea mass
+        include_railways: draw railways if defined in theme
 
     Raises:
         RuntimeError: If street network data cannot be retrieved
@@ -577,15 +579,16 @@ def create_poster(
         pbar.update(1)
 
         # 4. Fetch railways
-        pbar.set_description("Downloading railways")
-        railways = ox.graph_from_point(point, 
-                            compensated_dist,  
-                            custom_filter='["railway"~"rail|light_rail"]', 
-                            retain_all=True,
-                            simplify=True)
+        if include_railways:
+            pbar.set_description("Downloading railways")
+            railways = ox.graph_from_point(point, 
+                                compensated_dist,  
+                                custom_filter='["railway"~"rail|light_rail|narrow_gauge|monorail|subway|tram|preserved"]', 
+                                retain_all=True,
+                                simplify=False)
         pbar.update(1)
 
-    print("✓ All data retrieved successfully!")
+    print("✔ All data retrieved successfully!")
 
     # 2. Setup Plot
     print("Rendering map...")
@@ -704,8 +707,8 @@ def create_poster(
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
         
-    if railways is None or len(railways) == 0:
-        print(f"❌ Résultat vide : Aucun réseau ferroviaire trouvé à {city}.")
+    if railways is None or len(railways) == 0 or not 'railway' in THEME:
+        print(f"❌ Empty result : No railway found at {city} or not defined in THEME.")
     else:
         try:
             rail_proj = ox.project_graph(railways)
@@ -719,14 +722,13 @@ def create_poster(
             ax.set_xlim(crop_xlim)
             ax.set_ylim(crop_ylim)  
 
-            
         except ValueError:
-            # C'est l'erreur la plus courante quand OSMnx ne trouve "No data elements"
-            print(f"❌ Aucun rail trouvé : La requête OSMnx n'a renvoyé aucune donnée pour '{city}'.")
+            # Most common error when OSMnx returns "No data elements"
+            print(f"❌ No railway found : OSMnx query resturned no data for '{city}'.")
 
         except Exception as e:
-            # Pour attraper les autres problèmes (connexion internet, nom de ville inconnu, etc.)
-            print(f"⚠️ Une erreur inattendue est survenue : {e}")
+            # Catch other problems (internet connection, unknown city name, etc.)
+            print(f"⚠️ Unexpected error : {e}")
     
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
@@ -904,7 +906,7 @@ def create_poster(
     plt.savefig(output_file, format=fmt, **save_kwargs)
 
     plt.close()
-    print(f"✓ Done! Poster saved as {output_file}")
+    print(f"✔ Done! Poster saved as {output_file}")
 
 
 def print_examples():
@@ -964,7 +966,8 @@ Options:
   --format, -f             Output format for the poster ('png', 'svg', 'pdf') (default: png)
   --fonts                  Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.
   --fast                   Fast mode: fetches only driving roads (faster but less detailed)
-  --include-oceans
+  --include-oceans         Render oceans and seas
+  --include-railways       Render railways
   
 Distance guide:
   4000-6000m   Small/dense cities (Venice, Amsterdam old center)
@@ -1102,11 +1105,20 @@ Examples:
     )
     parser.add_argument(
         "--include-oceans",
+        "-iO",
         dest="include_oceans",
         action="store_true",
         help="Enable automatic ocean/sea filling based on coastlines",
     )
     parser.set_defaults(include_oceans=False)
+    parser.add_argument(
+        "--include-railways",
+        "-iR",
+        dest="include_railways",
+        action="store_true",
+        help="Enable railways rendering",
+    )
+    parser.set_defaults(include_railways=False)
 
     args = parser.parse_args()
 
@@ -1147,7 +1159,7 @@ Examples:
         themes_to_generate = available_themes
     else:
         if args.theme not in available_themes:
-            print(f"Error: Theme '{args.theme}' not found.")
+            print(f"❌ Error: Theme '{args.theme}' not found.")
             print(f"Available themes: {', '.join(available_themes)}")
             sys.exit(1)
         themes_to_generate = [args.theme]
@@ -1169,7 +1181,7 @@ Examples:
             lat = parse(args.latitude)
             lon = parse(args.longitude)
             coords = [lat, lon]
-            print(f"✓ Coordinates: {', '.join([str(i) for i in coords])}")
+            print(f"✔ Coordinates: {', '.join([str(i) for i in coords])}")
         else:
             coords = get_coordinates(args.city, args.country)
 
@@ -1190,14 +1202,15 @@ Examples:
                 fonts=custom_fonts,
                 fast_mode=args.fast_mode,
 				include_oceans=args.include_oceans,
+                include_railways=args.include_railways,
             )
 
         print("\n" + "=" * 50)
-        print("✓ Poster generation complete!")
+        print("✔ Poster generation complete!")
         print("=" * 50)
 
     except Exception as e:
-        print(f"\n✗ Error: {e}")
+        print(f"\n❌ Error: {e}")
         import traceback
 
         traceback.print_exc()

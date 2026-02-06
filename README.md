@@ -19,8 +19,12 @@ Generate beautiful, minimalist map posters for any city in the world.
 | Australia    | Melbourne      | forest          | <img src="posters/melbourne_forest_20260118_153446.png" width="250"> |
 | UAE          | Dubai          | midnight_blue   | <img src="posters/dubai_midnight_blue_20260118_140807.png" width="250"> |
 | USA          | Seattle        | emerald         | <img src="posters/seattle_emerald_20260124_162244.png" width="250"> |
-| Vietnam      | Hoi An         | Mohe Subaraya light | <img src="posters/hoi_an_mohe_subaraya_light_20260205_195949.png" width="250"> |
+| Việt Nam     | Thành phố Hồ Chí Minh | Mohe_Subaraya_light | <img src="posters/ho_chi_minh_city_mohe_subaraya_light_20260206_135842.png" width="250"> |
 | USA          | Los Angeles    | GTA             | <img src="posters/los_angeles_gta_20260130_142249.png" width="250"> |
+| Russia       | Moscow         | noir            | <img src="posters/moscow_noir_20260118_141923.png" width="250"> |
+| Nederland    | Amsterdam      | ocean           | <img src="posters/amsterdam_ocean_20260121_120007.png" width="250"> |
+| Hungary      | Budapest       | copper_patina   | <img src="posters/budapest_copper_patina_20260118_151213.png" width="250"> |
+| France       | Paris          | pastel          | <img src="posters/paris_pastel_dream_20260118_141126.png" width="250"> |
 
 ## Installation
 
@@ -82,7 +86,8 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
 | **OPTIONAL:** `--format` | `-f` | Output format for the poster ('png', 'svg', 'pdf') | `png` |
 | **OPTIONAL:** `--fast` | | Fast mode: fetches only driving roads (faster but less detailed) | |
-| **OPTIONAL:** `--include-oceans` | | Render oceans | |
+| **OPTIONAL:** `--include-oceans` | `-iO` | Render oceans and seas | |
+| **OPTIONAL:** `--include-railways` | `-iR` | Render railways | |
 
 
 ### Multilingual Support - i18n
