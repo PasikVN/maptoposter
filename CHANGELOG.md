@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased] - Community Contributions
 
-### Added
+### Added (this fork)
+- **theme**  Grand Prix
+- **theme**  Mohe Surabaya
+- **theme**  GTA Jamie Duk https://github.com/originalankur/maptoposter/issues/108
+- **Rotation** Added rotation ([PR #181](https://github.com/originalankur/maptoposter/pull/181)) 
 - **Green features** Added more green feature such as cemeteries and woodlands ([PR #161](https://github.com/originalankur/maptoposter/pull/161))
 - **Seas & Oceans** Optionaly render oceans and seas. `--include-oceans` and `-iO` arguments ([PR #159](https://github.com/originalankur/maptoposter/pull/159))
-- **Railways** Optionnaly render railways. `--include-railways` and `-iR` arguments [from THIS FORK]
+- **Railways** Optionnaly render railways. `--include-railways` and `-iR` arguments
+
+
+### Added
 - **uv package manager support** ([PR #20](https://github.com/originalankur/maptoposter/pull/20))
   - Added `pyproject.toml` with project metadata and dependencies
   - Added `uv.lock` for reproducible builds

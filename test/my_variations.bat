@@ -2,7 +2,8 @@
 
 chcp 65001
 
-cd %HOMEPATH%\OneDrive\Documents\GitHub\maptoposter
+cd %~dp0
+cd ..
 
 py -m pip install -r requirements.txt
 
@@ -37,7 +38,6 @@ py -m pip install -r requirements.txt
 ::py create_map_poster.py -c "Brest" -C "France" -t mohe_subaraya_light -d 18000 -iO -iR
 ::py create_map_poster.py -c "Ho Chi Minh city" -dc "Thành phố Hồ Chí Minh" -C "Vietnam" -dC "Việt Nam" -t mohe_subaraya_light -d 25000 -iO -iR
 
-py create_map_poster.py -c "SPA-Francorchamps" -C "Belgium" -t gta -d 18000
-py create_map_poster.py -c "Prenois" -C "France" -t gta -d 18000
+py create_map_poster.py -c "SPA-Francorchamps" -C "Belgium" -t grand_prix -d 6000 --show-north -O -90 --font-family "Russo One"
 
 pause

@@ -25,6 +25,7 @@ Generate beautiful, minimalist map posters for any city in the world.
 | Nederland    | Amsterdam      | ocean           | <img src="posters/amsterdam_ocean_20260121_120007.png" width="250"> |
 | Hungary      | Budapest       | copper_patina   | <img src="posters/budapest_copper_patina_20260118_151213.png" width="250"> |
 | France       | Paris          | pastel          | <img src="posters/paris_pastel_dream_20260118_141126.png" width="250"> |
+| Belgium      | SPA-Francorchamps | grand_prix   | <img src="posters/spa-francorchamps_grand_prix_20260211_212607.png" width="250"> |
 
 ## Installation
 
@@ -89,6 +90,29 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--include-oceans` | `-iO` | Render oceans and seas | |
 | **OPTIONAL:** `--include-railways` | `-iR` | Render railways | |
 
+#### Rotation Flags
+- `--orientation-offset` (short: `-O`)
+- Type: `float`
+- Allowed range: `-180` to `180`
+- Semantics:
+  - Positive values: clockwise rotation from north
+  - Negative values: counterclockwise rotation from north
+
+Example:
+
+```bash
+python create_map_poster.py -c "Paris" -C "France" -O 30
+python create_map_poster.py -c "Paris" -C "France" -O -45
+```
+
+North badge behavior:
+
+- `--show-north` enables the badge
+- `--show-north true|false` sets explicit boolean value
+- `--hide-north` forces it off
+- Default is dynamic:
+  - `false` when `--orientation-offset` is `0`
+  - `true` when `--orientation-offset` is non-zero
 
 ### Multilingual Support - i18n
 
