@@ -22,12 +22,17 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
-from geopandas import GeoDataFrame
+import networkx as nx
+# ox.settings.overpass_url = "https://overpass.kumi.systems/api/interpreter"
+ox.settings.use_cache=True
+ox.settings.log_console=False
+from geopandas import GeoDataFrame, GeoSeries
 from geopy.geocoders import Nominatim
 from lat_lon_parser import parse
 from matplotlib.font_manager import FontProperties
 from networkx import MultiDiGraph
-from shapely.geometry import Point
+from shapely.geometry import Point, box
+from shapely.ops import linemerge, polygonize, unary_union
 from tqdm import tqdm
 
 from font_management import load_fonts
@@ -37,13 +42,14 @@ class CacheError(Exception):
     """Raised when a cache operation fails."""
 
 
+
 CACHE_DIR_PATH = os.environ.get("CACHE_DIR", "cache")
 CACHE_DIR = Path(CACHE_DIR_PATH)
 CACHE_DIR.mkdir(exist_ok=True)
 
 THEMES_DIR = "themes"
 FONTS_DIR = "fonts"
-POSTERS_DIR = "posters"
+POSTERS_DIR = "posters/perso"
 
 FILE_ENCODING = "utf-8"
 
@@ -191,6 +197,7 @@ def load_theme(theme_name="terracotta"):
             "gradient_color": "#F5EDE4",
             "water": "#A8C4C4",
             "parks": "#E8E0D0",
+            "railway": "#FF0000",
             "road_motorway": "#A0522D",
             "road_primary": "#B8653A",
             "road_secondary": "#C9846A",
@@ -201,7 +208,7 @@ def load_theme(theme_name="terracotta"):
 
     with open(theme_file, "r", encoding=FILE_ENCODING) as f:
         theme = json.load(f)
-        print(f"✓ Loaded theme: {theme.get('name', theme_name)}")
+        print(f"✔ Loaded theme: {theme.get('name', theme_name)}")
         if "description" in theme:
             print(f"  {theme['description']}")
         return theme
@@ -278,6 +285,8 @@ def get_edge_colors_by_type(g):
             color = THEME["road_tertiary"]
         elif highway in ["residential", "living_street", "unclassified"]:
             color = THEME["road_residential"]
+        elif highway in ["raceway"]:
+            color = THEME["road_raceway"]
         else:
             color = THEME['road_default']
 
@@ -300,7 +309,7 @@ def get_edge_widths_by_type(g):
             highway = highway[0] if highway else 'unclassified'
 
         # Assign width based on road importance
-        if highway in ["motorway", "motorway_link"]:
+        if highway in ["motorway", "motorway_link", "raceway"]:
             width = 1.2
         elif highway in ["trunk", "trunk_link", "primary", "primary_link"]:
             width = 1.0
@@ -324,7 +333,7 @@ def get_coordinates(city, country):
     coords = f"coords_{city.lower()}_{country.lower()}"
     cached = cache_get(coords)
     if cached:
-        print(f"✓ Using cached coordinates for {city}, {country}")
+        print(f"✔ Using cached coordinates for {city}, {country}")
         return cached
 
     print("Looking up coordinates...")
@@ -357,10 +366,10 @@ def get_coordinates(city, country):
         # Use getattr to safely access address (helps static analyzers)
         addr = getattr(location, "address", None)
         if addr:
-            print(f"✓ Found: {addr}")
+            print(f"✔ Found: {addr}")
         else:
-            print("✓ Found location (address not available)")
-        print(f"✓ Coordinates: {location.latitude}, {location.longitude}")
+            print("✔ Found location (address not available)")
+        print(f"✔ Coordinates: {location.latitude}, {location.longitude}")
         try:
             cache_set(coords, (location.latitude, location.longitude))
         except CacheError as e:
@@ -406,7 +415,7 @@ def get_crop_limits(g_proj, center_lat_lon, fig, dist):
     )
 
 
-def fetch_graph(point, dist) -> MultiDiGraph | None:
+def fetch_graph(point, dist, ntype='all') -> MultiDiGraph | None:
     """
     Fetch street network graph from OpenStreetMap.
 
@@ -424,11 +433,18 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
     graph = f"graph_{lat}_{lon}_{dist}"
     cached = cache_get(graph)
     if cached is not None:
-        print("✓ Using cached street network")
+        print("✔ Using cached street network")
         return cast(MultiDiGraph, cached)
 
-    try:
-        g = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all', truncate_by_edge=True)
+    try:           
+        print(f"OSMnx fetching graph: {ntype}")
+        g_all = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type=ntype, truncate_by_edge=True)
+        
+        custom_filter = '["highway"~"raceway|service|track"]'
+        g_race = ox.graph_from_point(point, dist=dist, custom_filter=custom_filter)
+
+        g = nx.compose(g_all, g_race) 
+        
         # Rate limit between requests
         time.sleep(0.5)
         try:
@@ -462,7 +478,7 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     features = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
     cached = cache_get(features)
     if cached is not None:
-        print(f"✓ Using cached {name}")
+        print(f"✔ Using cached {name}")
         return cast(GeoDataFrame, cached)
 
     try:
@@ -488,11 +504,12 @@ def create_poster(
     output_format,
     width=12,
     height=16,
-    country_label=None,
-    name_label=None,
     display_city=None,
     display_country=None,
     fonts=None,
+    fast_mode=False,
+	include_oceans=True,
+    include_railways=False,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -509,30 +526,37 @@ def create_poster(
         output_format: File format ('png', 'svg', or 'pdf')
         width: Poster width in inches (default: 12)
         height: Poster height in inches (default: 16)
-        country_label: Optional override for country text on poster
-        _name_label: Optional override for city name (unused, reserved for future use)
+        display_country: Optional override for country text on poster
+        display_city: Optional override for city name
+        fonts:
+        fast_mode:
+        include_oceans: adds ocean and sea mass
+        include_railways: draw railways if defined in theme
 
     Raises:
         RuntimeError: If street network data cannot be retrieved
     """
     # Handle display names for i18n support
-    # Priority: display_city/display_country > name_label/country_label > city/country
-    display_city = display_city or name_label or city
-    display_country = display_country or country_label or country
+    # Priority: display_city/display_country > city/country
+    display_city = display_city or city
+    display_country = display_country or country
 
     print(f"\nGenerating map for {city}, {country}...")
 
     # Progress bar for data fetching
     with tqdm(
-        total=3,
+        total=4,
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
     ) as pbar:
+        compensated_dist = dist * (max(height, width) / min(height, width))/4 # To compensate for viewport crop
+        print(f"\ncompensated dist is: {compensated_dist}")
+        
         # 1. Fetch Street Network
-        pbar.set_description("Downloading street network")
-        compensated_dist = dist * (max(height, width) / min(height, width)) / 4  # To compensate for viewport crop
-        g = fetch_graph(point, compensated_dist)
+        network_type = 'drive' if fast_mode else 'all'
+        pbar.set_description(f"Downloading street network ({network_type})")
+        g = fetch_graph(point, compensated_dist, network_type)
         if g is None:
             raise RuntimeError("Failed to retrieve street network data.")
         pbar.update(1)
@@ -542,7 +566,13 @@ def create_poster(
         water = fetch_features(
             point,
             compensated_dist,
-            tags={"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
+			#tags={"natural": ["water","bay","strait"], "water": ["river","canal","moat","pond","lake"]},
+            tags={
+                "natural": ["water", "bay", "strait", "coastline", "sea", "ocean"],
+                "waterway": ["riverbank", "river", "canal", "dock", "basin"],
+                "place": ["sea", "ocean", "bay"],
+                "water": True
+            },
             name="water",
         )
         pbar.update(1)
@@ -552,12 +582,22 @@ def create_poster(
         parks = fetch_features(
             point,
             compensated_dist,
-            tags={"leisure": "park", "landuse": "grass"},
+            tags={"leisure": "park", "landuse": ["grass", "cemetery"], "natural": "wood"},
             name="parks",
         )
         pbar.update(1)
 
-    print("✓ All data retrieved successfully!")
+        # 4. Fetch railways
+        if include_railways:
+            pbar.set_description("Downloading railways")
+            railways = ox.graph_from_point(point, 
+                                compensated_dist,  
+                                custom_filter='["railway"~"rail|light_rail|narrow_gauge|monorail|subway|tram|preserved"]', 
+                                retain_all=True,
+                                simplify=False)
+        pbar.update(1)
+
+    print("✔ All data retrieved successfully!")
 
     # 2. Setup Plot
     print("Rendering map...")
@@ -568,18 +608,102 @@ def create_poster(
     # Project graph to a metric CRS so distances and aspect are linear (meters)
     g_proj = ox.project_graph(g)
 
+    # Determine cropping limits to maintain the poster aspect ratio
+    # We do this early so we can use it for coastline polygonization
+    crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
+
     # 3. Plot Layers
-    # Layer 1: Polygons (filter to only plot polygon/multipolygon geometries, not points)
+    # Layer 1: Water
     if water is not None and not water.empty:
-        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
-        water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
-        if not water_polys.empty:
-            # Project water features in the same CRS as the graph
-            try:
-                water_polys = ox.projection.project_gdf(water_polys)
-            except Exception:
-                water_polys = water_polys.to_crs(g_proj.graph['crs'])
-            water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
+        # Project water features in the same CRS as the graph
+        try:
+            water_proj = ox.projection.project_gdf(water)
+        except Exception:
+            water_proj = water.to_crs(g_proj.graph['crs'])
+
+        # Separate water polygons and island polygons
+        water_polys_all = water_proj[water_proj.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not water_polys_all.empty:
+            # Filter out islands/islets that might be tagged with natural=coastline, These should be treated as land.
+            is_island = np.array([False] * len(water_polys_all))
+            if "place" in water_polys_all.columns:
+                is_island = np.array(water_polys_all["place"].isin(["island", "islet", "archipelago"]))
+            
+            water_polys = water_polys_all[~is_island]
+            island_polys = water_polys_all[is_island]
+            
+            if not water_polys.empty:
+                water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
+            
+            if not island_polys.empty:
+                # Plot islands with background color to ensure they aren't covered by ocean fill
+                island_polys.plot(ax=ax, facecolor=THEME['bg'], edgecolor='none', zorder=0.6)
+
+        # Handle coastlines - try to form filled ocean polygons
+        water_lines = water_proj[water_proj.geometry.type.isin(["LineString", "MultiLineString"])]
+        if include_oceans and not water_lines.empty:
+            # Look for lines that represent coastlines or boundaries
+            coast_tags = ["coastline", "bay", "strait"]
+            if "natural" in water_lines.columns:
+                coastlines = water_lines[water_lines["natural"].isin(coast_tags)]
+                
+                if not coastlines.empty:
+                    bbox_poly = box(crop_xlim[0], crop_ylim[0], crop_xlim[1], crop_ylim[1])
+                    merged_coast = linemerge(list(coastlines.geometry.values))
+                    if not merged_coast.is_empty:
+                        # Intersect with a slightly buffered bbox to ensure we catch edges
+                        merged_coast = merged_coast.intersection(bbox_poly.buffer(10))
+                        
+                        # Union with bbox boundary to form closed areas
+                        combined = unary_union([merged_coast, bbox_poly.boundary])
+                        candidate_polys = list(polygonize(combined))
+                        
+                        if candidate_polys:
+                            # Heuristic: Land polygons contain many road nodes, Water polygons contain few/none
+                            # Get road nodes as points
+                            node_points = [Point(d['x'], d['y']) for n, d in g_proj.nodes(data=True)]
+                            
+                            if node_points:
+                                sample_count = min(800, len(node_points))
+                                sample_nodes = node_points[::max(1, len(node_points)//sample_count)]
+                                
+                                # Also get park centers to use as "known land" points
+                                park_points = []
+                                if parks is not None and not parks.empty:
+                                    try:
+                                        parks_proj = ox.projection.project_gdf(parks)
+                                        park_points = [p.centroid for p in parks_proj.geometry if p is not None]
+                                    except Exception:
+                                        pass
+
+                                for poly in candidate_polys:
+                                    # Skip very small fragments
+                                    if poly.area < (bbox_poly.area * 0.001):
+                                        continue
+
+                                    # If it contains many known park/green space, it is likely land
+                                    parks_inside = sum(1 for p in park_points if poly.contains(p))
+                                    if parks_inside > 3:
+                                        continue
+
+                                    # Count how many road nodes fall into this polygon
+                                    nodes_inside = sum(1 for p in sample_nodes if poly.contains(p))
+                                    
+                                    is_water = False
+                                    if nodes_inside < max(3, len(sample_nodes) * 0.02):
+                                        is_water = True
+                                    
+                                    if is_water:
+                                        GeoSeries([poly]).plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
+
+        if not water_lines.empty:
+            lines_to_plot = water_lines
+            # If oceans are disabled, filter out coastline outlines
+            if not include_oceans and "natural" in lines_to_plot.columns:
+                lines_to_plot = lines_to_plot[lines_to_plot["natural"] != "coastline"]
+            
+            if not lines_to_plot.empty:
+                lines_to_plot.plot(ax=ax, color=THEME['water'], linewidth=0.8, zorder=0.5)
 
     if parks is not None and not parks.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
@@ -591,13 +715,36 @@ def create_poster(
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
+        
+    if include_railways:
+        if railways is None or len(railways) == 0 or not 'railway' in THEME:
+            print(f"❌ Empty result : No railway found at {city} or not defined in THEME.")
+        else:
+            try:
+                rail_proj = ox.project_graph(railways)
+                ox.plot_graph(rail_proj, ax=ax, 
+                                        node_size=0, 
+                                        edge_color=THEME['railway'], 
+                                        edge_linewidth=0.6,
+                                        show=False,
+                                        close=False,)
+                ax.set_aspect("equal", adjustable="box")
+                ax.set_xlim(crop_xlim)
+                ax.set_ylim(crop_ylim)  
+
+            except ValueError:
+                # Most common error when OSMnx returns "No data elements"
+                print(f"❌ No railway found : OSMnx query resturned no data for '{city}'.")
+
+            except Exception as e:
+                # Catch other problems (internet connection, unknown city name, etc.)
+                print(f"⚠️ Unexpected error : {e}")
+    
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(g_proj)
     edge_widths = get_edge_widths_by_type(g_proj)
 
-    # Determine cropping limits to maintain the poster aspect ratio
-    crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
     # Plot the projected graph and then apply the cropped limits
     ox.plot_graph(
         g_proj, ax=ax, bgcolor=THEME['bg'],
@@ -769,7 +916,7 @@ def create_poster(
     plt.savefig(output_file, format=fmt, **save_kwargs)
 
     plt.close()
-    print(f"✓ Done! Poster saved as {output_file}")
+    print(f"✔ Done! Poster saved as {output_file}")
 
 
 def print_examples():
@@ -808,19 +955,30 @@ Examples:
   # River cities
   python create_map_poster.py -c "London" -C "UK" -t noir -d 15000              # Thames curves
   python create_map_poster.py -c "Budapest" -C "Hungary" -t copper_patina -d 8000  # Danube split
-
+  
+  # i18n support with custom display names
+  python create_map_poster.py -c "Tokyo" -C "Japan" -dc "東京" -dC "日本" --font-family "Noto Sans JP" -t japanese_ink
+  
   # List themes
   python create_map_poster.py --list-themes
 
 Options:
-  --city, -c        City name (required)
-  --country, -C     Country name (required)
-  --country-label   Override country text displayed on poster
-  --theme, -t       Theme name (default: terracotta)
-  --all-themes      Generate posters for all themes
-  --distance, -d    Map radius in meters (default: 18000)
-  --list-themes     List all available themes
-
+  --city, -c               City name (required)
+  --display-city, -dc      Custom display name for city (for i18n support)
+  --country, -C            Country name (required)
+  --display-country, -dC   Custom display name for country (for i18n support)
+  --theme, -t              Theme name (default: feature_based)
+  --all-themes             Generate posters for all themes
+  --distance, -d           Map radius in meters (default: 29000)
+  --list-themes            List all available themes
+  --width, -W              Image width in inches (default: 12)
+  --height, -H             Image height in inches (default: 16)
+  --format, -f             Output format for the poster ('png', 'svg', 'pdf') (default: png)
+  --fonts                  Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.
+  --fast                   Fast mode: fetches only driving roads (faster but less detailed)
+  --include-oceans         Render oceans and seas
+  --include-railways       Render railways
+  
 Distance guide:
   4000-6000m   Small/dense cities (Venice, Amsterdam old center)
   8000-12000m  Medium cities, focused downtown (Paris, Barcelona)
@@ -888,12 +1046,6 @@ Examples:
         help="Override longitude center point",
     )
     parser.add_argument(
-        "--country-label",
-        dest="country_label",
-        type=str,
-        help="Override country text displayed on poster",
-    )
-    parser.add_argument(
         "--theme",
         "-t",
         type=str,
@@ -955,6 +1107,28 @@ Examples:
         choices=["png", "svg", "pdf"],
         help="Output format for the poster (default: png)",
     )
+    parser.add_argument(
+        "--fast",
+        dest="fast_mode",
+        action="store_true",
+        help="Fast mode: fetches only driving roads (faster but less detailed)",
+    )
+    parser.add_argument(
+        "--include-oceans",
+        "-iO",
+        dest="include_oceans",
+        action="store_true",
+        help="Enable automatic ocean/sea filling based on coastlines",
+    )
+    parser.set_defaults(include_oceans=False)
+    parser.add_argument(
+        "--include-railways",
+        "-iR",
+        dest="include_railways",
+        action="store_true",
+        help="Enable railways rendering",
+    )
+    parser.set_defaults(include_railways=False)
 
     args = parser.parse_args()
 
@@ -995,7 +1169,7 @@ Examples:
         themes_to_generate = available_themes
     else:
         if args.theme not in available_themes:
-            print(f"Error: Theme '{args.theme}' not found.")
+            print(f"❌ Error: Theme '{args.theme}' not found.")
             print(f"Available themes: {', '.join(available_themes)}")
             sys.exit(1)
         themes_to_generate = [args.theme]
@@ -1017,7 +1191,7 @@ Examples:
             lat = parse(args.latitude)
             lon = parse(args.longitude)
             coords = [lat, lon]
-            print(f"✓ Coordinates: {', '.join([str(i) for i in coords])}")
+            print(f"✔ Coordinates: {', '.join([str(i) for i in coords])}")
         else:
             coords = get_coordinates(args.city, args.country)
 
@@ -1033,18 +1207,20 @@ Examples:
                 args.format,
                 args.width,
                 args.height,
-                country_label=args.country_label,
                 display_city=args.display_city,
                 display_country=args.display_country,
                 fonts=custom_fonts,
+                fast_mode=args.fast_mode,
+				include_oceans=args.include_oceans,
+                include_railways=args.include_railways,
             )
 
         print("\n" + "=" * 50)
-        print("✓ Poster generation complete!")
+        print("✔ Poster generation complete!")
         print("=" * 50)
 
     except Exception as e:
-        print(f"\n✗ Error: {e}")
+        print(f"\n❌ Error: {e}")
         import traceback
 
         traceback.print_exc()

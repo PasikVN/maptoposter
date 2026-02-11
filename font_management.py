@@ -149,7 +149,7 @@ def load_fonts(font_family: Optional[str] = None) -> Optional[dict]:
         print(f"Loading Google Font: {font_family}")
         fonts = download_google_font(font_family)
         if fonts:
-            print(f"✓ Font '{font_family}' loaded successfully")
+            print(f"✔ Font '{font_family}' loaded successfully")
             return fonts
 
         print(f"⚠ Failed to load '{font_family}', falling back to local Roboto")

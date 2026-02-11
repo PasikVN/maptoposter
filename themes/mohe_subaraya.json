@@ -1,0 +1,16 @@
+{
+  "name": "Mohe Subaraya",
+  "description": "Old Japanese map circa 1860 Mohe Subaraya",
+  "bg": "#FAD8AF",
+  "text": "#7A6049",
+  "gradient_color": "#FFDCB3",
+  "water": "#729F92",
+  "parks": "#E48362",
+  "railway": "#806435",
+  "road_motorway": "#EBB762",
+  "road_primary": "#EDB963",
+  "road_secondary": "#F0BB64",
+  "road_tertiary": "#F2BD65",
+  "road_residential": "#F5BF66",
+  "road_default": "#F6C067"
+}

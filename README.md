@@ -1,24 +1,30 @@
 # City Map Poster Generator
 
+forked from originalankur/maptoposter
+
 Generate beautiful, minimalist map posters for any city in the world.
 
-<img src="posters/singapore_neon_cyberpunk_20260118_153328.png" width="250">
-<img src="posters/dubai_midnight_blue_20260118_140807.png" width="250">
-
 ## Examples
+
 
 | Country      | City           | Theme           | Poster |
 |:------------:|:--------------:|:---------------:|:------:|
 | USA          | San Francisco  | sunset          | <img src="posters/san_francisco_sunset_20260118_144726.png" width="250"> |
 | Spain        | Barcelona      | warm_beige      | <img src="posters/barcelona_warm_beige_20260118_140048.png" width="250"> |
 | Italy        | Venice         | blueprint       | <img src="posters/venice_blueprint_20260118_140505.png" width="250"> |
-| Japan        | Tokyo          | japanese_ink    | <img src="posters/tokyo_japanese_ink_20260118_142446.png" width="250"> |
+| Japan        | Tokyo          | japanese_ink    | <img src="posters/tokyo_japanese_ink_20260118_142446.png" width="250"> <img src="posters/tokyo_japanese_ink_20260128_093318.png" width="250">|
 | India        | Mumbai         | contrast_zones  | <img src="posters/mumbai_contrast_zones_20260118_145843.png" width="250"> |
 | Morocco      | Marrakech      | terracotta      | <img src="posters/marrakech_terracotta_20260118_143253.png" width="250"> |
 | Singapore    | Singapore      | neon_cyberpunk  | <img src="posters/singapore_neon_cyberpunk_20260118_153328.png" width="250"> |
 | Australia    | Melbourne      | forest          | <img src="posters/melbourne_forest_20260118_153446.png" width="250"> |
 | UAE          | Dubai          | midnight_blue   | <img src="posters/dubai_midnight_blue_20260118_140807.png" width="250"> |
 | USA          | Seattle        | emerald         | <img src="posters/seattle_emerald_20260124_162244.png" width="250"> |
+| Việt Nam     | Thành phố Hồ Chí Minh | Mohe_Subaraya_light | <img src="posters/ho_chi_minh_city_mohe_subaraya_light_20260206_135842.png" width="250"> |
+| USA          | Los Angeles    | GTA             | <img src="posters/los_angeles_gta_20260130_142249.png" width="250"> |
+| Russia       | Moscow         | noir            | <img src="posters/moscow_noir_20260118_141923.png" width="250"> |
+| Nederland    | Amsterdam      | ocean           | <img src="posters/amsterdam_ocean_20260121_120007.png" width="250"> |
+| Hungary      | Budapest       | copper_patina   | <img src="posters/budapest_copper_patina_20260118_151213.png" width="250"> |
+| France       | Paris          | pastel          | <img src="posters/paris_pastel_dream_20260118_141126.png" width="250"> |
 
 ## Installation
 
@@ -72,13 +78,17 @@ python create_map_poster.py --city <city> --country <country> [options]
 |--------|-------|-------------|---------|
 | **OPTIONAL:** `--latitude` | `-lat` | Override latitude center point (use with --longitude) | |
 | **OPTIONAL:** `--longitude` | `-long` | Override longitude center point (use with --latitude) | |
-| **OPTIONAL:** `--country-label` | | Override country text displayed on poster | |
 | **OPTIONAL:** `--theme` | `-t` | Theme name | terracotta |
 | **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 18000 |
 | **OPTIONAL:** `--list-themes` | | List all available themes | |
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
 | **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 (max: 20) |
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
+| **OPTIONAL:** `--format` | `-f` | Output format for the poster ('png', 'svg', 'pdf') | `png` |
+| **OPTIONAL:** `--fast` | | Fast mode: fetches only driving roads (faster but less detailed) | |
+| **OPTIONAL:** `--include-oceans` | `-iO` | Render oceans and seas | |
+| **OPTIONAL:** `--include-railways` | `-iR` | Render railways | |
+
 
 ### Multilingual Support - i18n
 

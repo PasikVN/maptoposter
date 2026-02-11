@@ -1,0 +1,16 @@
+{
+  "name": "Mohe Subaraya",
+  "description": "Old Japanese map circa 1860 Mohe Subaraya. PasikVN https://github.com/PasikVN/maptoposter",
+  "bg": "#F5EDE4",
+  "text": "#7A6049",
+  "gradient_color": "#F5EDE4",
+  "water": "#729F92",
+  "parks": "#E48362",
+  "railway": "#4A3A1F",
+  "road_motorway": "#755C31",
+  "road_primary": "#6A6A6A",
+  "road_secondary": "#757575",
+  "road_tertiary": "#909090",
+  "road_residential": "#B8B8B8",
+  "road_default": "#BABABA"
+}
