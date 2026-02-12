@@ -514,7 +514,7 @@ def create_poster(
     display_country=None,
     fonts=None,
     fast_mode=False,
-	include_oceans=True,
+    include_oceans=True,
     include_railways=False,
     orientation_offset=0.0,
     show_north=False,
@@ -553,7 +553,7 @@ def create_poster(
 
     # Progress bar for data fetching
     with tqdm(
-        total=4,
+        total=5,
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -574,7 +574,7 @@ def create_poster(
         water = fetch_features(
             point,
             compensated_dist,
-			#tags={"natural": ["water","bay","strait"], "water": ["river","canal","moat","pond","lake"]},
+            #tags={"natural": ["water","bay","strait"], "water": ["river","canal","moat","pond","lake"]},
             tags={
                 "natural": ["water", "bay", "strait", "coastline", "sea", "ocean"],
                 "waterway": ["riverbank", "river", "canal", "dock", "basin"],
@@ -594,8 +594,18 @@ def create_poster(
             name="parks",
         )
         pbar.update(1)
+        
+        # 4 Fetch airports runways
+        pbar.set_description("Downloading remarkable feature spaces")
+        rmkbl = fetch_features(
+            point,
+            compensated_dist,
+            tags={"aeroway": ["runway", "taxiway"]},
+            name="aeroway",
+        )
+        pbar.update(1)
 
-        # 4. Fetch railways
+        # 5. Fetch railways
         if include_railways:
             pbar.set_description("Downloading railways")
             railways = ox.graph_from_point(point, 
@@ -621,11 +631,11 @@ def create_poster(
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
 
 
-	# Apply optional orientation offset before plotting map layers
+    # Apply optional orientation offset before plotting map layers
     g_proj, (water, parks) = rotate_graph_and_features(
         g_proj, [water, parks], point, orientation_offset
     )
-	
+
     # 3. Plot Layers
     # Layer 1: Water
     if water is not None and not water.empty:
@@ -729,7 +739,29 @@ def create_poster(
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
-        
+
+    if rmkbl is not None and not rmkbl.empty:
+        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
+        rmkbl_polys = rmkbl[rmkbl.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not rmkbl_polys.empty:
+            # Project park features in the same CRS as the graph
+            try:
+                rmkbl_polys = ox.projection.project_gdf(rmkbl_polys)
+            except Exception:
+                rmkbl_polys = rmkbl_polys.to_crs(g_proj.graph['crs'])
+            large_runways = rmkbl_polys[rmkbl_polys.length > 500]
+            large_runways.plot(ax=ax, facecolor=THEME["road_motorway"], edgecolor="none", zorder=0.9)
+
+    # # Extra custom layer: railways!
+    # try:
+        # railways = ox.features_from_point(point, tags={'railway': 'rail'}, dist=dist)
+    # except:
+        # railways = None
+    
+    # if railways is not None and not railways.empty:
+        # railways = railways.to_crs(g_proj.graph["crs"])
+        # railways.plot(ax=ax, color=THEME['railway'], linewidth=1.2, linestyle=(0, (6, 2)), zorder=2.5)            
+            
     if include_railways:
         if railways is None or len(railways) == 0 or not 'railway' in THEME:
             print(f"❌ Empty result : No railway found at {city} or not defined in THEME.")
@@ -984,24 +1016,24 @@ Examples:
   python create_map_poster.py --list-themes
 
 Options:
-  --city, -c               City name (required)
-  --display-city, -dc      Custom display name for city (for i18n support)
-  --country, -C            Country name (required)
-  --display-country, -dC   Custom display name for country (for i18n support)
-  --theme, -t              Theme name (default: feature_based)
-  --all-themes             Generate posters for all themes
-  --distance, -d           Map radius in meters (default: 29000)
-  --list-themes            List all available themes
-  --width, -W              Image width in inches (default: 12)
-  --height, -H             Image height in inches (default: 16)
-  --format, -f             Output format for the poster ('png', 'svg', 'pdf') (default: png)
-  --fonts                  Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.
-  --fast                   Fast mode: fetches only driving roads (faster but less detailed)
-  --include-oceans         Render oceans and seas
-  --include-railways       Render railways
-  --orientation-offset, -O Rotation of the map (Allowed range: `-180` to `180`)
-  --show-north             Enables the compass badge (true|false)  `false` when `--orientation-offset` is 0 else `true`
-  --hide-north             forces compass badge off
+  --city, -c                  City name (required)
+  --display-city, -dc         Custom display name for city (for i18n support)
+  --country, -C               Country name (required)
+  --display-country, -dC      Custom display name for country (for i18n support)
+  --theme, -t                 Theme name (default: feature_based)
+  --all-themes                Generate posters for all themes
+  --distance, -d              Map radius in meters (default: 29000)
+  --list-themes               List all available themes
+  --width, -W                 Image width in inches (default: 12)
+  --height, -H                Image height in inches (default: 16)
+  --format, -f                Output format for the poster ('png', 'svg', 'pdf') (default: png)
+  --fonts                     Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.
+  --fast                      Fast mode: fetches only driving roads (faster but less detailed)
+  --include-oceans, -iO       Render oceans and seas
+  --include-railways, -iR     Render railways
+  --orientation-offset, -O    Rotation of the map (Allowed range: `-180` to `180`)
+  --show-north                Enables the compass badge (true|false)  `false` when `--orientation-offset` is 0 else `true`
+  --hide-north                forces compass badge off
 
   
 Distance guide:
