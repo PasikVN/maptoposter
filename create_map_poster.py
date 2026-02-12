@@ -24,7 +24,7 @@ import numpy as np
 
 import osmnx as ox
 import networkx as nx
-# ox.settings.overpass_url = "https://overpass.kumi.systems/api/interpreter"
+
 ox.settings.use_cache=True
 ox.settings.log_console=False
 
@@ -54,11 +54,12 @@ CACHE_DIR = Path(CACHE_DIR_PATH)
 CACHE_DIR.mkdir(exist_ok=True)
 
 THEMES_DIR = "themes"
-FONTS_DIR = "fonts"
 POSTERS_DIR = "posters/perso"
 
 FILE_ENCODING = "utf-8"
 
+
+# Font loading handled by font_management.py module
 FONTS = load_fonts()
 
 
@@ -118,9 +119,6 @@ def cache_set(key: str, value):
             pickle.dump(value, f, protocol=pickle.HIGHEST_PROTOCOL)
     except Exception as e:
         raise CacheError(f"Cache write failed: {e}") from e
-
-
-# Font loading now handled by font_management.py module
 
 
 def is_latin_script(text):
@@ -292,7 +290,7 @@ def get_edge_colors_by_type(g):
         elif highway in ["residential", "living_street", "unclassified"]:
             color = THEME["road_residential"]
         elif highway in ["raceway"]:
-            color = THEME["road_raceway"]
+            color = THEME.get("road_raceway", THEME['road_default'])
         else:
             color = THEME['road_default']
 
