@@ -48,6 +48,10 @@ class CacheError(Exception):
     """Raised when a cache operation fails."""
 
 
+import logging
+logging.basicConfig(filename='maptoposter.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 
 CACHE_DIR_PATH = os.environ.get("CACHE_DIR", "cache")
 CACHE_DIR = Path(CACHE_DIR_PATH)
@@ -753,30 +757,70 @@ def create_poster(
         
         # Many airports in OSM are mapped as LineStrings (the centerline of the runway) rather than Polygons (the actual tarmac)
         # We need to handle both
-        rmkbl_polys = rmkbl_proj[rmkbl_proj.geometry.type.isin(["Polygon", "MultiPolygon"])]
-        rmkbl_lines = rmkbl_proj[rmkbl_proj.geometry.type.isin(["LineString", "MultiLineString"])]
+        rmkbl_polys = rmkbl_proj[rmkbl_proj.geometry.type.isin(["Polygon", "MultiPolygon"])].copy()
+        rmkbl_lines = rmkbl_proj[rmkbl_proj.geometry.type.isin(["LineString", "MultiLineString"])].copy()
         
         airway_color = THEME.get("aeroway", THEME["road_motorway"])  # see if aeroway color is defined, else fall back on road_motorway
         
+        # Render Polygons (Runway surfaces)
         if not rmkbl_polys.empty:
-            # 1. Plot Polygons (Surface areas)
-            # Filter by length (meters) and plot to opt-out helipad
-            # Note: length on a polygon is the perimeter; consider using area or just plotting all
             #large_runways = rmkbl_polys[rmkbl_polys.length > 200]
             rmkbl_polys.plot(ax=ax, 
                         facecolor=airway_color, 
                         edgecolor=airway_color,  # Set edge color to match to avoid 'background' bleed
                         linewidth=0.5, 
                         zorder=5)
-                        
+        
+        # Render Lines (Taxiways or Runway described as LineStrings)           
         if not rmkbl_lines.empty:
-            # 2. Plot Lines (Taxiways and smaller landing strips)
-            rmkbl_lines.plot(
-                ax=ax, 
-                color=airway_color, 
-                linewidth=1.5, # Thicker lines to make taxiways visible
-                zorder=5.1     # Slightly higher than polygons to avoid flickering
-            )
+            # Calculate Scale: How many meters per Matplotlib point?
+            x_range = crop_xlim[1] - crop_xlim[0]
+            fig_width_inches = fig.get_size_inches()[0]
+            m_to_pt_ratio = (fig_width_inches / x_range) * 72
+            
+            # 4. Improved Width logic with visibility floor
+            def calculate_linewidth(row):
+                a_type = row.get('aeroway', 'runway')
+                w = row.get('width')
+                
+                # Default physical widths in meters
+                default_w = 45.0 if a_type == 'runway' else 15.0
+                
+                # Try to get physical width from tags
+                try:
+                    if w is None or (isinstance(w, float) and np.isnan(w)):
+                        val = default_w
+                    elif isinstance(w, str):
+                        val = float(''.join(filter(lambda x: x.isdigit() or x == '.', w)))
+                    else:
+                        val = float(w)
+                except (ValueError, TypeError):
+                    val = default_w
+                
+                # Increase the visibility floor to 0.8
+                return max(val * m_to_pt_ratio, 0.8)
+            
+            rmkbl_lines.loc[:, 'lw_pt'] = rmkbl_lines.apply(calculate_linewidth, axis=1)
+            
+            # 2. Plotting
+            # Slightly higher in zorder than polygons to avoid flickering
+            for _, row in rmkbl_lines.iterrows():
+                lw = row['lw_pt']
+                geom = row.geometry
+                a_type = row.get('aeroway', 'unknown')
+                raw_width = row.get('width', 'N/A')
+                
+                print(f"  -> Plotting {a_type}: RawWidth={raw_width}, CalcLW={lw:.4f} pts, Geom={geom.geom_type}")
+                
+                if geom.geom_type == 'LineString':
+                    x, y = geom.xy
+                    ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
+                elif geom.geom_type == 'MultiLineString':
+                    print(f"     (Complex geometry with {len(geom.geoms)} parts)")
+                    for line in geom.geoms:
+                        x, y = line.xy
+                        ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
+                            
                   
     if include_railways and railways is not None:
         if railways is not None:
