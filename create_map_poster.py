@@ -784,7 +784,7 @@ def create_poster(
                 # Try to get physical width from tags
                 try:
                     if w is None or (isinstance(w, float) and np.isnan(w)):
-                        val = default_sw
+                        val = default_w
                     elif isinstance(w, str):
                         val = float(''.join(filter(lambda x: x.isdigit() or x == '.', w)))
                     else:
