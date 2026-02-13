@@ -616,7 +616,7 @@ def create_poster(
                                 custom_filter=rail_filter, 
                                 retain_all=True,
                                 simplify=True) # Set to True to help performance
-        pbar.update(1)
+            pbar.update(1)
 
     print("✔ All data retrieved successfully!")
 
@@ -809,6 +809,7 @@ def create_poster(
                 
                 if geom.geom_type == 'LineString':
                     x, y = geom.xy
+                    # solid_capstyle='butt' ensures the lines have flat ends, which looks much more pro for airport infrastructure than the default rounded ends
                     ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
                 elif geom.geom_type == 'MultiLineString':
                     #print(f"     (Complex geometry with {len(geom.geoms)} parts)")
