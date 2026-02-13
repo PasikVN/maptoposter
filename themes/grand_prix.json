@@ -6,11 +6,13 @@
   "gradient_color": "#21242E",
   "water": "#000000",
   "parks": "#53565F",
+  "railway": "#9D8099",
   "road_motorway": "#E6EBF0",
   "road_primary": "#E2E7EC",
   "road_secondary": "#DCE1E6",
   "road_tertiary": "#D7DCE0",
   "road_residential": "#D4D9DE",
   "road_default": "#D4D9DE",
-  "road_raceway":"#FD5355"
+  "road_raceway":"#FD5355",
+  "aeroway": "#F0F1F4"
 }

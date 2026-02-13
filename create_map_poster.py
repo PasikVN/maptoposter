@@ -48,6 +48,10 @@ class CacheError(Exception):
     """Raised when a cache operation fails."""
 
 
+import logging
+logging.basicConfig(filename='maptoposter.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
 
 CACHE_DIR_PATH = os.environ.get("CACHE_DIR", "cache")
 CACHE_DIR = Path(CACHE_DIR_PATH)
@@ -514,7 +518,7 @@ def create_poster(
     display_country=None,
     fonts=None,
     fast_mode=False,
-	include_oceans=True,
+    include_oceans=True,
     include_railways=False,
     orientation_offset=0.0,
     show_north=False,
@@ -553,7 +557,7 @@ def create_poster(
 
     # Progress bar for data fetching
     with tqdm(
-        total=4,
+        total=5,
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -574,7 +578,7 @@ def create_poster(
         water = fetch_features(
             point,
             compensated_dist,
-			#tags={"natural": ["water","bay","strait"], "water": ["river","canal","moat","pond","lake"]},
+            #tags={"natural": ["water","bay","strait"], "water": ["river","canal","moat","pond","lake"]},
             tags={
                 "natural": ["water", "bay", "strait", "coastline", "sea", "ocean"],
                 "waterway": ["riverbank", "river", "canal", "dock", "basin"],
@@ -594,15 +598,29 @@ def create_poster(
             name="parks",
         )
         pbar.update(1)
+        
+        # 4 Fetch airports runways
+        pbar.set_description("Downloading remarkable feature spaces")
+        rmkbl = fetch_features(
+            point,
+            compensated_dist,
+            tags={"aeroway": ["runway", "taxiway"]},
+            name="aeroway",
+        )
+        pbar.update(1)
 
-        # 4. Fetch railways
+        # 5. Fetch railways
         if include_railways:
             pbar.set_description("Downloading railways")
+            rail_filter = (
+                '["railway"~"rail|light_rail|narrow_gauge|monorail|subway|tram|preserved"]'
+                '["service"!~"yard|spur"]'
+                )
             railways = ox.graph_from_point(point, 
                                 compensated_dist,  
-                                custom_filter='["railway"~"rail|light_rail|narrow_gauge|monorail|subway|tram|preserved"]', 
+                                custom_filter=rail_filter, 
                                 retain_all=True,
-                                simplify=False)
+                                simplify=True) # Set to True to help performance
         pbar.update(1)
 
     print("✔ All data retrieved successfully!")
@@ -621,11 +639,11 @@ def create_poster(
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
 
 
-	# Apply optional orientation offset before plotting map layers
+    # Apply optional orientation offset before plotting map layers
     g_proj, (water, parks) = rotate_graph_and_features(
         g_proj, [water, parks], point, orientation_offset
     )
-	
+
     # 3. Plot Layers
     # Layer 1: Water
     if water is not None and not water.empty:
@@ -729,30 +747,92 @@ def create_poster(
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
+
+    if rmkbl is not None and not rmkbl.empty: 
+        # Project first to ensure units are in meters for the length filter
+        try:
+            rmkbl_proj = ox.projection.project_gdf(rmkbl)
+        except Exception:
+            rmkbl_proj = rmkbl.to_crs(g_proj.graph['crs'])
         
-    if include_railways:
-        if railways is None or len(railways) == 0 or not 'railway' in THEME:
-            print(f"❌ Empty result : No railway found at {city} or not defined in THEME.")
-        else:
-            try:
-                rail_proj = ox.project_graph(railways)
-                ox.plot_graph(rail_proj, ax=ax, 
-                                        node_size=0, 
-                                        edge_color=THEME['railway'], 
-                                        edge_linewidth=0.6,
-                                        show=False,
-                                        close=False,)
-                ax.set_aspect("equal", adjustable="box")
-                ax.set_xlim(crop_xlim)
-                ax.set_ylim(crop_ylim)  
-
-            except ValueError:
-                # Most common error when OSMnx returns "No data elements"
-                print(f"❌ No railway found : OSMnx query resturned no data for '{city}'.")
-
-            except Exception as e:
-                # Catch other problems (internet connection, unknown city name, etc.)
-                print(f"⚠️ Unexpected error : {e}")
+        # Many airports in OSM are mapped as LineStrings (the centerline of the runway) rather than Polygons (the actual tarmac)
+        # We need to handle both
+        rmkbl_polys = rmkbl_proj[rmkbl_proj.geometry.type.isin(["Polygon", "MultiPolygon"])].copy()
+        rmkbl_lines = rmkbl_proj[rmkbl_proj.geometry.type.isin(["LineString", "MultiLineString"])].copy()
+        
+        airway_color = THEME.get("aeroway", THEME["road_motorway"])  # see if aeroway color is defined, else fall back on road_motorway
+        
+        # Render Polygons (Runway surfaces)
+        if not rmkbl_polys.empty:
+            #large_runways = rmkbl_polys[rmkbl_polys.length > 200]
+            rmkbl_polys.plot(ax=ax, 
+                        facecolor=airway_color, 
+                        edgecolor=airway_color,  # Set edge color to match to avoid 'background' bleed
+                        linewidth=0.5, 
+                        zorder=5)
+        
+        # Render Lines (Taxiways or Runway described as LineStrings)           
+        if not rmkbl_lines.empty:
+            # Calculate Scale: How many meters per Matplotlib point?
+            x_range = crop_xlim[1] - crop_xlim[0]
+            fig_width_inches = fig.get_size_inches()[0]
+            m_to_pt_ratio = (fig_width_inches / x_range) * 72
+            
+            # 4. Improved Width logic with visibility floor
+            def calculate_linewidth(row):
+                a_type = row.get('aeroway', 'runway')
+                w = row.get('width')
+                
+                # Default physical widths in meters
+                default_w = 45.0 if a_type == 'runway' else 15.0
+                
+                # Try to get physical width from tags
+                try:
+                    if w is None or (isinstance(w, float) and np.isnan(w)):
+                        val = default_w
+                    elif isinstance(w, str):
+                        val = float(''.join(filter(lambda x: x.isdigit() or x == '.', w)))
+                    else:
+                        val = float(w)
+                except (ValueError, TypeError):
+                    val = default_w
+                
+                # Increase the visibility floor to 0.8
+                return max(val * m_to_pt_ratio, 0.8)
+            
+            rmkbl_lines.loc[:, 'lw_pt'] = rmkbl_lines.apply(calculate_linewidth, axis=1)
+            
+            # 2. Plotting
+            # Slightly higher in zorder than polygons to avoid flickering
+            for _, row in rmkbl_lines.iterrows():
+                lw = row['lw_pt']
+                geom = row.geometry
+                a_type = row.get('aeroway', 'unknown')
+                raw_width = row.get('width', 'N/A')
+                
+                print(f"  -> Plotting {a_type}: RawWidth={raw_width}, CalcLW={lw:.4f} pts, Geom={geom.geom_type}")
+                
+                if geom.geom_type == 'LineString':
+                    x, y = geom.xy
+                    ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
+                elif geom.geom_type == 'MultiLineString':
+                    print(f"     (Complex geometry with {len(geom.geoms)} parts)")
+                    for line in geom.geoms:
+                        x, y = line.xy
+                        ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
+                            
+                  
+    if include_railways and railways is not None:
+        if railways is not None:
+            railway_color = THEME.get("railway", THEME["road_secondary"])  # see if railway color is defined, else fall back on road_secondary
+            # Convert to GeoDataFrame
+            _, g_rail_edges = ox.graph_to_gdfs(ox.project_graph(railways))
+            # Render using GeoPandas (Faster)
+            g_rail_edges.plot(ax=ax, 
+                            color=railway_color, 
+                            linewidth=0.6, 
+                            linestyle=(0, (5, 2)), # Dashed line for classic railway look
+                            zorder=2.5)
     
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
@@ -984,24 +1064,24 @@ Examples:
   python create_map_poster.py --list-themes
 
 Options:
-  --city, -c               City name (required)
-  --display-city, -dc      Custom display name for city (for i18n support)
-  --country, -C            Country name (required)
-  --display-country, -dC   Custom display name for country (for i18n support)
-  --theme, -t              Theme name (default: feature_based)
-  --all-themes             Generate posters for all themes
-  --distance, -d           Map radius in meters (default: 29000)
-  --list-themes            List all available themes
-  --width, -W              Image width in inches (default: 12)
-  --height, -H             Image height in inches (default: 16)
-  --format, -f             Output format for the poster ('png', 'svg', 'pdf') (default: png)
-  --fonts                  Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.
-  --fast                   Fast mode: fetches only driving roads (faster but less detailed)
-  --include-oceans         Render oceans and seas
-  --include-railways       Render railways
-  --orientation-offset, -O Rotation of the map (Allowed range: `-180` to `180`)
-  --show-north             Enables the compass badge (true|false)  `false` when `--orientation-offset` is 0 else `true`
-  --hide-north             forces compass badge off
+  --city, -c                  City name (required)
+  --display-city, -dc         Custom display name for city (for i18n support)
+  --country, -C               Country name (required)
+  --display-country, -dC      Custom display name for country (for i18n support)
+  --theme, -t                 Theme name (default: feature_based)
+  --all-themes                Generate posters for all themes
+  --distance, -d              Map radius in meters (default: 29000)
+  --list-themes               List all available themes
+  --width, -W                 Image width in inches (default: 12)
+  --height, -H                Image height in inches (default: 16)
+  --format, -f                Output format for the poster ('png', 'svg', 'pdf') (default: png)
+  --fonts                     Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.
+  --fast                      Fast mode: fetches only driving roads (faster but less detailed)
+  --include-oceans, -iO       Render oceans and seas
+  --include-railways, -iR     Render railways
+  --orientation-offset, -O    Rotation of the map (Allowed range: `-180` to `180`)
+  --show-north                Enables the compass badge (true|false)  `false` when `--orientation-offset` is 0 else `true`
+  --hide-north                forces compass badge off
 
   
 Distance guide:
