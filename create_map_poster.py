@@ -745,26 +745,38 @@ def create_poster(
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
 
     if rmkbl is not None and not rmkbl.empty: 
-        # 1. Project first to ensure units are in meters for the length filter
+        # Project first to ensure units are in meters for the length filter
         try:
             rmkbl_proj = ox.projection.project_gdf(rmkbl)
         except Exception:
             rmkbl_proj = rmkbl.to_crs(g_proj.graph['crs'])
         
-        # 2. Filter for Polygons/MultiPolygons on the PROJECTED data
+        # Many airports in OSM are mapped as LineStrings (the centerline of the runway) rather than Polygons (the actual tarmac)
+        # We need to handle both
         rmkbl_polys = rmkbl_proj[rmkbl_proj.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        rmkbl_lines = rmkbl_proj[rmkbl_proj.geometry.type.isin(["LineString", "MultiLineString"])]
+        
+        airway_color = THEME.get("aeroway", THEME["road_motorway"])  # see if aeroway color is defined, else fall back on road_motorway
         
         if not rmkbl_polys.empty:
-            airway_color = THEME.get("aeroway", THEME["road_motorway"])  # see if aeroway color is defined, else fall back on road_motorway
-            
-            # 3. Filter by length (meters) and plot to opt-out helipad
+            # 1. Plot Polygons (Surface areas)
+            # Filter by length (meters) and plot to opt-out helipad
             # Note: length on a polygon is the perimeter; consider using area or just plotting all
-            large_runways = rmkbl_polys[rmkbl_polys.length > 200]
-            large_runways.plot(ax=ax, 
+            #large_runways = rmkbl_polys[rmkbl_polys.length > 200]
+            rmkbl_polys.plot(ax=ax, 
                         facecolor=airway_color, 
                         edgecolor=airway_color,  # Set edge color to match to avoid 'background' bleed
                         linewidth=0.5, 
-                        zorder=4)
+                        zorder=5)
+                        
+        if not rmkbl_lines.empty:
+            # 2. Plot Lines (Taxiways and smaller landing strips)
+            rmkbl_lines.plot(
+                ax=ax, 
+                color=airway_color, 
+                linewidth=1.5, # Thicker lines to make taxiways visible
+                zorder=5.1     # Slightly higher than polygons to avoid flickering
+            )
                   
     if include_railways and railways is not None:
         if railways is not None:
