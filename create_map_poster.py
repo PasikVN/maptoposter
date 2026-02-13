@@ -608,11 +608,15 @@ def create_poster(
         # 5. Fetch railways
         if include_railways:
             pbar.set_description("Downloading railways")
+            rail_filter = (
+                '["railway"~"rail|light_rail|narrow_gauge|monorail|subway|tram|preserved"]'
+                '["service"!~"yard|spur"]'
+                )
             railways = ox.graph_from_point(point, 
                                 compensated_dist,  
-                                custom_filter='["railway"~"rail|light_rail|narrow_gauge|monorail|subway|tram|preserved"]', 
+                                custom_filter=rail_filter, 
                                 retain_all=True,
-                                simplify=False)
+                                simplify=True) # Set to True to help performance
         pbar.update(1)
 
     print("✔ All data retrieved successfully!")
@@ -740,51 +744,39 @@ def create_poster(
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
 
-    if rmkbl is not None and not rmkbl.empty:
-        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
-        rmkbl_polys = rmkbl[rmkbl.geometry.type.isin(["Polygon", "MultiPolygon"])]
+    if rmkbl is not None and not rmkbl.empty: 
+        # 1. Project first to ensure units are in meters for the length filter
+        try:
+            rmkbl_proj = ox.projection.project_gdf(rmkbl)
+        except Exception:
+            rmkbl_proj = rmkbl.to_crs(g_proj.graph['crs'])
+        
+        # 2. Filter for Polygons/MultiPolygons on the PROJECTED data
+        rmkbl_polys = rmkbl_proj[rmkbl_proj.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        
         if not rmkbl_polys.empty:
-            # Project park features in the same CRS as the graph
-            try:
-                rmkbl_polys = ox.projection.project_gdf(rmkbl_polys)
-            except Exception:
-                rmkbl_polys = rmkbl_polys.to_crs(g_proj.graph['crs'])
-            large_runways = rmkbl_polys[rmkbl_polys.length > 500]
-            large_runways.plot(ax=ax, facecolor=THEME["road_motorway"], edgecolor="none", zorder=0.9)
-
-    # # Extra custom layer: railways!
-    # try:
-        # railways = ox.features_from_point(point, tags={'railway': 'rail'}, dist=dist)
-    # except:
-        # railways = None
-    
-    # if railways is not None and not railways.empty:
-        # railways = railways.to_crs(g_proj.graph["crs"])
-        # railways.plot(ax=ax, color=THEME['railway'], linewidth=1.2, linestyle=(0, (6, 2)), zorder=2.5)            
+            airway_color = THEME.get("aeroway", THEME["road_motorway"])  # see if aeroway color is defined, else fall back on road_motorway
             
-    if include_railways:
-        if railways is None or len(railways) == 0 or not 'railway' in THEME:
-            print(f"❌ Empty result : No railway found at {city} or not defined in THEME.")
-        else:
-            try:
-                rail_proj = ox.project_graph(railways)
-                ox.plot_graph(rail_proj, ax=ax, 
-                                        node_size=0, 
-                                        edge_color=THEME['railway'], 
-                                        edge_linewidth=0.6,
-                                        show=False,
-                                        close=False,)
-                ax.set_aspect("equal", adjustable="box")
-                ax.set_xlim(crop_xlim)
-                ax.set_ylim(crop_ylim)  
-
-            except ValueError:
-                # Most common error when OSMnx returns "No data elements"
-                print(f"❌ No railway found : OSMnx query resturned no data for '{city}'.")
-
-            except Exception as e:
-                # Catch other problems (internet connection, unknown city name, etc.)
-                print(f"⚠️ Unexpected error : {e}")
+            # 3. Filter by length (meters) and plot to opt-out helipad
+            # Note: length on a polygon is the perimeter; consider using area or just plotting all
+            large_runways = rmkbl_polys[rmkbl_polys.length > 200]
+            large_runways.plot(ax=ax, 
+                        facecolor=airway_color, 
+                        edgecolor=airway_color,  # Set edge color to match to avoid 'background' bleed
+                        linewidth=0.5, 
+                        zorder=4)
+                  
+    if include_railways and railways is not None:
+        if railways is not None:
+            railway_color = THEME.get("railway", THEME["road_secondary"])  # see if railway color is defined, else fall back on road_secondary
+            # Convert to GeoDataFrame
+            _, g_rail_edges = ox.graph_to_gdfs(ox.project_graph(railways))
+            # Render using GeoPandas (Faster)
+            g_rail_edges.plot(ax=ax, 
+                            color=railway_color, 
+                            linewidth=0.6, 
+                            linestyle=(0, (5, 2)), # Dashed line for classic railway look
+                            zorder=2.5)
     
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")

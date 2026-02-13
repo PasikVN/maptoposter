@@ -30,16 +30,18 @@ py -m pip install -r requirements.txt
 
 
 :: =======================  DEBUG ============================
-py create_map_poster.py -c "Tokyo" -C "Japan" -dc "東京" -dC "日本" --font-family "Noto Sans JP" -t japanese_ink -d 40000 -iR
+::py create_map_poster.py -c "Tokyo" -C "Japan" -dc "東京" -dC "日本" --font-family "Noto Sans JP" -t japanese_ink -d 40000 -iR
 ::py create_map_poster.py -c "Grenoble" -C "France" -t japanese_ink -d 18000 --fast
 ::py create_map_poster.py -c "London" -C "England" -t pascal -d 18000
 ::py create_map_poster.py -c "Los Angeles" -C "United States of America" -t gta -d 18000 -iR
 ::py create_map_poster.py -c "La Rochelle" -C "France" -t mohe_subaraya_light -d 18000 --include-oceans --include-railways
 ::py create_map_poster.py -c "Brest" -C "France" -t mohe_subaraya_light -d 18000 -iO -iR
-py create_map_poster.py -c "Ho Chi Minh city" -dc "Thành phố Hồ Chí Minh" -C "Vietnam" -dC "Việt Nam" -t mohe_subaraya_light -d 40000 -iO -iR --font-family "Playfair Display"
+::py create_map_poster.py -c "Ho Chi Minh city" -dc "Thành phố Hồ Chí Minh" -C "Vietnam" -dC "Việt Nam" -t mohe_subaraya_light -d 40000 -iO -iR --font-family "Playfair Display"
+
+py create_map_poster.py -c "Changi Airport" -C "Singapore" -t grand_prix -d 30000 --font-family "Montserrat"
 
 ::py create_map_poster.py -c "SPA-Francorchamps" -C "Belgium" -t grand_prix -d 6000 --show-north -O -90 --font-family "Russo One" --hide-north -f svg
-py create_map_poster.py -c "Warszawa" -C "Polska" -t grand_prix -d 60000 --font-family "Brygada 1918"
+::py create_map_poster.py -c "Warszawa" -C "Polska" -t grand_prix -d 60000 --font-family "Brygada 1918"
 
 
 pause
