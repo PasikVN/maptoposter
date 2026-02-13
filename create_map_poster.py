@@ -708,16 +708,21 @@ def create_poster(
                                     if poly.area < (bbox_poly.area * 0.001):
                                         continue
 
-                                    # If it contains many known park/green space, it is likely land
-                                    parks_inside = sum(1 for p in park_points if poly.contains(p))
-                                    if parks_inside > 3:
-                                        continue
-
                                     # Count how many road nodes fall into this polygon
                                     nodes_inside = sum(1 for p in sample_nodes if poly.contains(p))
                                     
+                                    # Heuristic: Land polygons have significantly higher road node density than water.
+                                    # We use density (nodes per km²) to be scale-invariant.
+                                    # A threshold of 50 nodes/km² (with sampling) is safe to distinguish 
+                                    # even sparsely populated land from water/oceans.
+                                    
+                                    # Adjust density based on sampling rate
+                                    sampling_ratio = len(sample_nodes) / len(node_points)
+                                    estimated_total_nodes = nodes_inside / sampling_ratio if sampling_ratio > 0 else 0
+                                    density = (estimated_total_nodes / poly.area) * 1_000_000 # nodes per km²
+                                    
                                     is_water = False
-                                    if nodes_inside < max(3, len(sample_nodes) * 0.02):
+                                    if density < 50:
                                         is_water = True
                                     
                                     if is_water:
@@ -1221,7 +1226,7 @@ Examples:
         action="store_true",
         help="Enable automatic ocean/sea filling based on coastlines",
     )
-    parser.set_defaults(include_oceans=False)
+    parser.set_defaults(include_oceans=True)
     parser.add_argument(
         "--include-railways",
         "-iR",
@@ -1344,7 +1349,6 @@ Examples:
                 display_country=args.display_country,
                 fonts=custom_fonts,
                 fast_mode=args.fast_mode,
-                
                 include_oceans=args.include_oceans,
                 include_railways=args.include_railways,
                 orientation_offset=args.orientation_offset,

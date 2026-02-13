@@ -86,9 +86,9 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 (max: 20) |
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
 | **OPTIONAL:** `--format` | `-f` | Output format for the poster ('png', 'svg', 'pdf') | `png` |
-| **OPTIONAL:** `--fast` | | Fast mode: fetches only driving roads (faster but less detailed) | |
-| **OPTIONAL:** `--include-oceans` | `-iO` | Render oceans and seas | |
-| **OPTIONAL:** `--include-railways` | `-iR` | Render railways | |
+| **OPTIONAL:** `--fast` | | Fast mode: fetches only driving roads (faster but less detailed) | false |
+| **OPTIONAL:** `--include-oceans` | `-iO` | Render oceans and seas | true |
+| **OPTIONAL:** `--include-railways` | `-iR` | Render railways | false |
 
 #### Rotation Flags
 - `--orientation-offset` (short: `-O`)
