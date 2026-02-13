@@ -48,11 +48,6 @@ class CacheError(Exception):
     """Raised when a cache operation fails."""
 
 
-import logging
-logging.basicConfig(filename='maptoposter.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-
-
 CACHE_DIR_PATH = os.environ.get("CACHE_DIR", "cache")
 CACHE_DIR = Path(CACHE_DIR_PATH)
 CACHE_DIR.mkdir(exist_ok=True)
@@ -789,7 +784,7 @@ def create_poster(
                 # Try to get physical width from tags
                 try:
                     if w is None or (isinstance(w, float) and np.isnan(w)):
-                        val = default_w
+                        val = default_sw
                     elif isinstance(w, str):
                         val = float(''.join(filter(lambda x: x.isdigit() or x == '.', w)))
                     else:
@@ -810,13 +805,13 @@ def create_poster(
                 a_type = row.get('aeroway', 'unknown')
                 raw_width = row.get('width', 'N/A')
                 
-                print(f"  -> Plotting {a_type}: RawWidth={raw_width}, CalcLW={lw:.4f} pts, Geom={geom.geom_type}")
+                #print(f"  -> Plotting {a_type}: RawWidth={raw_width}, CalcLW={lw:.4f} pts, Geom={geom.geom_type}")
                 
                 if geom.geom_type == 'LineString':
                     x, y = geom.xy
                     ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
                 elif geom.geom_type == 'MultiLineString':
-                    print(f"     (Complex geometry with {len(geom.geoms)} parts)")
+                    #print(f"     (Complex geometry with {len(geom.geoms)} parts)")
                     for line in geom.geoms:
                         x, y = line.xy
                         ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
