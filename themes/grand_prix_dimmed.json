@@ -1,5 +1,5 @@
 {
-  "name": "Grand Prix Dark",
+  "name": "Grand Prix Dark (Dimmed)",
   "description": "High-contrast racing theme with midnight navy background and vibrant red track",
   "bg": "#1A1D26",
   "text": "#FFFFFF",
@@ -7,12 +7,13 @@
   "water": "#0D0F14",
   "parks": "#252A36",
   "railway": "#3D4455",
-  "road_motorway": "#E6EBF0",
-  "road_primary": "#E2E7EC",
-  "road_secondary": "#DCE1E6",
-  "road_tertiary": "#D7DCE0",
-  "road_residential": "#D4D9DE",
-  "road_default": "#D4D9DE",
+  "road_motorway": "#B0B5C0",
+  "road_primary": "#9DA2AF",
+  "road_secondary": "#7D828F",
+  "road_tertiary": "#5D626F",
+  "road_residential": "#4D525F",
+  "road_default": "#4D525F",
   "road_raceway": "#FF2D2D",
   "aeroway": "#F0F1F4"
+}
 }

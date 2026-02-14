@@ -615,8 +615,12 @@ def create_poster(
                                 compensated_dist,  
                                 custom_filter=rail_filter, 
                                 retain_all=True,
-                                simplify=True) # Set to True to help performance
-            pbar.update(1)
+                                simplify=False) # Some railways disapear if set to true (ex: Hué, Vietnam)
+            
+        else:
+            pbar.set_description("Downloading railways skiped")
+            railways=None
+        pbar.update(1)
 
     print("✔ All data retrieved successfully!")
 
@@ -643,10 +647,7 @@ def create_poster(
     # Layer 1: Water
     if water is not None and not water.empty:
         # Project water features in the same CRS as the graph
-        try:
-            water_proj = ox.projection.project_gdf(water)
-        except Exception:
-            water_proj = water.to_crs(g_proj.graph['crs'])
+        water_proj = water.to_crs(g_proj.graph['crs'])
 
         # Separate water polygons and island polygons
         water_polys_all = water_proj[water_proj.geometry.type.isin(["Polygon", "MultiPolygon"])]
@@ -737,23 +738,19 @@ def create_poster(
             if not lines_to_plot.empty:
                 lines_to_plot.plot(ax=ax, color=THEME['water'], linewidth=0.8, zorder=0.5)
 
+    # Layer 2: parks 
     if parks is not None and not parks.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
             # Project park features in the same CRS as the graph
-            try:
-                parks_polys = ox.projection.project_gdf(parks_polys)
-            except Exception:
-                parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
+            parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
 
+    # Layer 3: aeroways
     if rmkbl is not None and not rmkbl.empty: 
         # Project first to ensure units are in meters for the length filter
-        try:
-            rmkbl_proj = ox.projection.project_gdf(rmkbl)
-        except Exception:
-            rmkbl_proj = rmkbl.to_crs(g_proj.graph['crs'])
+        rmkbl_proj = rmkbl.to_crs(g_proj.graph['crs'])
         
         # Many airports in OSM are mapped as LineStrings (the centerline of the runway) rather than Polygons (the actual tarmac)
         # We need to handle both
@@ -821,21 +818,20 @@ def create_poster(
                     for line in geom.geoms:
                         x, y = line.xy
                         ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
-                            
-                  
-    if include_railways and railways is not None:
-        if railways is not None:
-            railway_color = THEME.get("railway", THEME["road_secondary"])  # see if railway color is defined, else fall back on road_secondary
-            # Convert to GeoDataFrame
-            _, g_rail_edges = ox.graph_to_gdfs(ox.project_graph(railways))
-            # Render using GeoPandas (Faster)
-            g_rail_edges.plot(ax=ax, 
-                            color=railway_color, 
-                            linewidth=0.6, 
-                            linestyle=(0, (5, 2)), # Dashed line for classic railway look
-                            zorder=2.5)
+
+    # Layer 4: railways                                           
+    if railways is not None and not rmkbl.empty:
+        railway_color = THEME.get("railway", THEME["road_secondary"])  # see if railway color is defined, else fall back on road_secondary
+        # Convert to GeoDataFrame
+        _, g_rail_edges = ox.graph_to_gdfs(ox.project_graph(railways))
+        # Render using GeoPandas (Faster)
+        g_rail_edges.plot(ax=ax, 
+                        color=railway_color, 
+                        linewidth=0.6, 
+                        linestyle=(0, (5, 2)), # Dashed line for classic railway look
+                        zorder=2.5)
     
-    # Layer 2: Roads with hierarchy coloring
+    # Layer 5: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(g_proj)
     edge_widths = get_edge_widths_by_type(g_proj)
@@ -853,7 +849,7 @@ def create_poster(
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
 
-    # Layer 3: Gradients (Top and Bottom)
+    # Layer 6: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
     create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
 
