@@ -28,7 +28,7 @@ from geopy.geocoders import Nominatim
 from lat_lon_parser import parse
 from matplotlib.font_manager import FontProperties
 from networkx import MultiDiGraph
-from shapely.geometry import Point, box
+from shapely.geometry import Point, box as shapely_box
 from shapely.ops import linemerge, polygonize, unary_union
 from tqdm import tqdm
 
@@ -349,6 +349,123 @@ def get_crop_limits(g_proj, center_lat_lon, fig, dist):
     )
 
 
+def _is_land_polygon(polygon, coastline_geom):
+    """
+    Determine if a polygon is land using the OSM coastline direction convention.
+
+    In OpenStreetMap, coastlines are oriented with land on the LEFT and water
+    on the RIGHT when following the direction of the way. This function checks
+    which side of the nearest coastline segment a polygon falls on.
+
+    Args:
+        polygon: A Shapely Polygon to classify
+        coastline_geom: The projected coastline geometry (LineString or MultiLineString)
+
+    Returns:
+        True if the polygon is on the land side, False if water
+    """
+    test_point = polygon.representative_point()
+
+    # Find the nearest individual LineString segment
+    if coastline_geom.geom_type == 'MultiLineString':
+        nearest_line = min(coastline_geom.geoms, key=lambda l: l.distance(test_point))
+    elif coastline_geom.geom_type == 'LineString':
+        nearest_line = coastline_geom
+    else:
+        return False
+
+    # Project test point onto the nearest coastline
+    param = nearest_line.project(test_point)
+
+    # Get local direction of coastline at the nearest point
+    epsilon = 1.0  # 1 meter in projected CRS
+    p1 = nearest_line.interpolate(max(0, param - epsilon))
+    p2 = nearest_line.interpolate(min(nearest_line.length, param + epsilon))
+
+    # Direction vector of coastline
+    dx = p2.x - p1.x
+    dy = p2.y - p1.y
+
+    # Vector from coastline point to polygon test point
+    nearest_point = nearest_line.interpolate(param)
+    cx = test_point.x - nearest_point.x
+    cy = test_point.y - nearest_point.y
+
+    # Cross product: positive = left side = land, negative = right side = water
+    cross = dx * cy - dy * cx
+    return cross > 0
+
+
+def build_sea_polygons(coastline_gdf, g_proj, crop_xlim, crop_ylim, center_lat_lon):
+    """
+    Build sea/ocean polygons from OSM coastline data.
+
+    In OpenStreetMap, seas and oceans are defined by coastline lines rather
+    than water polygons. This function converts coastline lines into renderable
+    water polygons by splitting the viewport into land and water regions.
+
+    Uses the OSM coastline direction convention (land on left, water on right)
+    to correctly classify all land masses, even when multiple disconnected
+    land polygons exist (e.g. Istanbul's European and Asian sides).
+
+    Args:
+        coastline_gdf: GeoDataFrame of coastline LineString features (or None)
+        g_proj: Projected graph (used for CRS)
+        crop_xlim: (xmin, xmax) tuple from get_crop_limits
+        crop_ylim: (ymin, ymax) tuple from get_crop_limits
+        center_lat_lon: (lat, lon) tuple of the map center
+
+    Returns:
+        GeoDataFrame of water polygons in the projected CRS, or None
+    """
+    if coastline_gdf is None or coastline_gdf.empty:
+        return None
+
+    crs = g_proj.graph["crs"]
+
+    # Filter to line geometries only
+    line_mask = coastline_gdf.geometry.type.isin(["LineString", "MultiLineString"])
+    coast_lines = coastline_gdf[line_mask]
+    if coast_lines.empty:
+        return None
+
+    # Project coastline to graph CRS
+    try:
+        coast_proj = ox.projection.project_gdf(coast_lines, to_crs=crs)
+    except Exception:
+        try:
+            coast_proj = coast_lines.to_crs(crs)
+        except Exception:
+            return None
+
+    # Build viewport rectangle from crop limits
+    viewport = shapely_box(crop_xlim[0], crop_ylim[0], crop_xlim[1], crop_ylim[1])
+
+    # Merge coastline fragments and clip to viewport
+    merged = linemerge(list(coast_proj.geometry))
+    clipped = merged.intersection(viewport)
+
+    if clipped.is_empty:
+        return None
+
+    # Combine clipped coastline with viewport boundary to form closed regions
+    combined = unary_union([clipped, viewport.boundary])
+
+    # Create polygons from the line network
+    polygons = list(polygonize(combined))
+    if not polygons:
+        return None
+
+    # Classify each polygon using coastline direction convention.
+    # OSM coastlines have land on the left, water on the right.
+    water_polys = [p for p in polygons if not _is_land_polygon(p, clipped)]
+
+    if not water_polys:
+        return None
+
+    return GeoDataFrame(geometry=water_polys, crs=crs)
+
+
 def fetch_graph(point, dist, ntype='all') -> MultiDiGraph | None:
     """
     Fetch street network graph from OpenStreetMap.
@@ -479,29 +596,36 @@ def create_poster(
 
     print(f"\nGenerating map for {city}, {country}...")
 
-    # Progress bar for data fetching
+    # -------------
+    # 1. Data fetching (with progress bar)
     with tqdm(
-        total=5,
+        total=6,
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
     ) as pbar:
         compensated_dist = dist * (max(height, width) / min(height, width))/4 # To compensate for viewport crop
-        print(f"\ncompensated dist is: {compensated_dist}")
+
+        # Since we are rotating a rectangle, the corners of your poster will "swing" out of the original north-up square. 
+        # We need to fetch data using a radius equal to the diagonal of our poster: Fetching 1.5x ensures corners are always filled.
+        # Note: The diagonal of a square is ~1.41 times its side (rounded to 1.5)
+        fetch_dist = compensated_dist * 1.5
+
+        print(f"\ncompensated dist is: {compensated_dist} - dist is: {fetch_dist}")
         
-        # 1. Fetch Street Network
+        # 1.1 Fetch Street Network
         network_type = 'drive' if fast_mode else 'all'
         pbar.set_description(f"Downloading street network ({network_type})")
-        g = fetch_graph(point, compensated_dist, network_type)
+        g = fetch_graph(point, fetch_dist, network_type)
         if g is None:
             raise RuntimeError("Failed to retrieve street network data.")
         pbar.update(1)
 
-        # 2. Fetch Water Features
+        # 1.2 Fetch Water Features
         pbar.set_description("Downloading water features")
         water = fetch_features(
             point,
-            compensated_dist,
+            fetch_dist,
             #tags={"natural": ["water","bay","strait"], "water": ["river","canal","moat","pond","lake"]},
             tags={
                 "natural": ["water", "bay", "strait", "coastline", "sea", "ocean"],
@@ -512,28 +636,38 @@ def create_poster(
             name="water",
         )
         pbar.update(1)
+        
+		# 1.3 Fetch Coastline
+        pbar.set_description("Downloading coastline data")
+        coastline = fetch_features(
+            point,
+            fetch_dist,
+            tags={"natural": "coastline"},
+            name="coastline",
+        )
+        pbar.update(1)
 
-        # 3. Fetch Parks
+        # 1.4 Fetch Parks
         pbar.set_description("Downloading parks/green spaces")
         parks = fetch_features(
             point,
-            compensated_dist,
+            fetch_dist,
             tags={"leisure": "park", "landuse": ["grass", "cemetery"], "natural": "wood"},
             name="parks",
         )
         pbar.update(1)
         
-        # 4 Fetch airports runways
+        # 1.5 Fetch airports runways
         pbar.set_description("Downloading remarkable feature spaces")
-        rmkbl = fetch_features(
+        runways = fetch_features(
             point,
-            compensated_dist,
+            fetch_dist,
             tags={"aeroway": ["runway", "taxiway"]},
             name="aeroway",
         )
         pbar.update(1)
 
-        # 5. Fetch railways
+        # 1.6 Fetch railways
         if include_railways:
             pbar.set_description("Downloading railways")
             rail_filter = (
@@ -541,7 +675,7 @@ def create_poster(
                 '["service"!~"yard|spur"]'
                 )
             railways = ox.graph_from_point(point, 
-                                compensated_dist,  
+                                fetch_dist,  
                                 custom_filter=rail_filter, 
                                 retain_all=True,
                                 simplify=False) # Some railways disapear if set to true (ex: Hué, Vietnam)
@@ -553,6 +687,7 @@ def create_poster(
 
     print("✔ All data retrieved successfully!")
 
+    # -------------
     # 2. Setup Plot
     print("Rendering map...")
     fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME["bg"])
@@ -566,139 +701,70 @@ def create_poster(
     # We do this early so we can use it for coastline polygonization
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
 
+    # Project everything to the same CRS first
+    crs = g_proj.graph['crs']
 
-    # Apply optional orientation offset before plotting map layers
-    g_proj, (water, parks) = rotate_graph_and_features(
-        g_proj, [water, parks], point, orientation_offset
-    )
-
-    # 3. Plot Layers
-    # Layer 1: Water
-    if water is not None and not water.empty:
-        # Project water features in the same CRS as the graph
-        water_proj = water.to_crs(g_proj.graph['crs'])
-
-        # Separate water polygons and island polygons
-        water_polys_all = water_proj[water_proj.geometry.type.isin(["Polygon", "MultiPolygon"])]
-        if not water_polys_all.empty:
-            # Filter out islands/islets that might be tagged with natural=coastline, These should be treated as land.
-            is_island = np.array([False] * len(water_polys_all))
-            if "place" in water_polys_all.columns:
-                is_island = np.array(water_polys_all["place"].isin(["island", "islet", "archipelago"]))
+    def safe_project(gdf, target_crs):
+        if gdf is None or gdf.empty: return None
+        try: return ox.projection.project_gdf(gdf, to_crs=target_crs)
+        except Exception:
+            try: return gdf.to_crs(target_crs)
+            except Exception: return None
             
-            water_polys = water_polys_all[~is_island]
-            island_polys = water_polys_all[is_island]
-            
-            if not water_polys.empty:
-                water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
-            
-            if not island_polys.empty:
-                # Plot islands with background color to ensure they aren't covered by ocean fill
-                island_polys.plot(ax=ax, facecolor=THEME['bg'], edgecolor='none', zorder=0.6)
+    water_proj = safe_project(water, crs)
+    parks_proj = safe_project(parks, crs)
+    runways_proj = safe_project(runways, crs)
+    railways_proj = safe_project(railways, crs)
+    coastline_proj = safe_project(coastline, crs)
 
-        # Handle coastlines - try to form filled ocean polygons
-        water_lines = water_proj[water_proj.geometry.type.isin(["LineString", "MultiLineString"])]
-        if include_oceans and not water_lines.empty:
-            # Look for lines that represent coastlines or boundaries
-            coast_tags = ["coastline", "bay", "strait"]
-            if "natural" in water_lines.columns:
-                coastlines = water_lines[water_lines["natural"].isin(coast_tags)]
-                
-                if not coastlines.empty:
-                    bbox_poly = box(crop_xlim[0], crop_ylim[0], crop_xlim[1], crop_ylim[1])
-                    merged_coast = linemerge(list(coastlines.geometry.values))
-                    if not merged_coast.is_empty:
-                        # Intersect with a slightly buffered bbox to ensure we catch edges
-                        merged_coast = merged_coast.intersection(bbox_poly.buffer(10))
-                        
-                        # Union with bbox boundary to form closed areas
-                        combined = unary_union([merged_coast, bbox_poly.boundary])
-                        candidate_polys = list(polygonize(combined))
-                        
-                        if candidate_polys:
-                            # Heuristic: Land polygons contain many road nodes, Water polygons contain few/none
-                            # Get road nodes as points
-                            node_points = [Point(d['x'], d['y']) for n, d in g_proj.nodes(data=True)]
-                            
-                            if node_points:
-                                sample_count = min(800, len(node_points))
-                                sample_nodes = node_points[::max(1, len(node_points)//sample_count)]
-                                
-                                # Also get park centers to use as "known land" points
-                                park_points = []
-                                if parks is not None and not parks.empty:
-                                    try:
-                                        parks_proj = ox.projection.project_gdf(parks)
-                                        park_points = [p.centroid for p in parks_proj.geometry if p is not None]
-                                    except Exception:
-                                        pass
+    # -------------
+    # 3. Rotate everything IN ONE GO
+    features_to_rotate = [water_proj, coastline_proj, parks_proj, runways_proj, railways_proj]
+    g_rotated, rotated_list = rotate_graph_and_features(g_proj, features_to_rotate, point, orientation_offset)
+    # Re-assign variables from the ROTATED list
+    water_rot, coastline_rot, parks_rot, runways_rot, railways_rot = rotated_list
 
-                                for poly in candidate_polys:
-                                    # Skip very small fragments
-                                    if poly.area < (bbox_poly.area * 0.001):
-                                        continue
+    # -------------
+    # 4. Build Sea Polygons using the ROTATED coordinate system and the coastline_rot (which contains the rotated, 
+    # un-clipped lines), we ensure the water correctly fills the gaps created by the rotation.
+    # Use the original crop_xlim/ylim so the sea fills the final view
+    # Note: The sea_polys should be built AFTER the rotation.
+    sea_polys = build_sea_polygons(coastline_rot, g_rotated, crop_xlim, crop_ylim, point)
 
-                                    # Count how many road nodes fall into this polygon
-                                    nodes_inside = sum(1 for p in sample_nodes if poly.contains(p))
-                                    
-                                    # Heuristic: Land polygons have significantly higher road node density than water.
-                                    # We use density (nodes per km²) to be scale-invariant.
-                                    # A threshold of 50 nodes/km² (with sampling) is safe to distinguish 
-                                    # even sparsely populated land from water/oceans.
-                                    
-                                    # Adjust density based on sampling rate
-                                    sampling_ratio = len(sample_nodes) / len(node_points)
-                                    estimated_total_nodes = nodes_inside / sampling_ratio if sampling_ratio > 0 else 0
-                                    density = (estimated_total_nodes / poly.area) * 1_000_000 # nodes per km²
-                                    
-                                    is_water = False
-                                    if density < 50:
-                                        is_water = True
-                                    
-                                    if is_water:
-                                        GeoSeries([poly]).plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
+    # -------------
+    # 5. Plot the ROTATED variables
+    if sea_polys is not None:
+        sea_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.4)
+    if water_rot is not None:
+        water_rot.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.4)
 
-        if not water_lines.empty:
-            lines_to_plot = water_lines
-            # If oceans are disabled, filter out coastline outlines
-            if not include_oceans and "natural" in lines_to_plot.columns:
-                lines_to_plot = lines_to_plot[lines_to_plot["natural"] != "coastline"]
-            
-            if not lines_to_plot.empty:
-                lines_to_plot.plot(ax=ax, color=THEME['water'], linewidth=0.8, zorder=0.5)
-
-    # Layer 2: parks 
-    if parks is not None and not parks.empty:
+    # Layer: parks 
+    if parks_rot is not None and not parks_rot.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
-        parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        parks_polys = parks_rot[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
-            # Project park features in the same CRS as the graph
-            parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
 
-    # Layer 3: aeroways
-    if rmkbl is not None and not rmkbl.empty: 
-        # Project first to ensure units are in meters for the length filter
-        rmkbl_proj = rmkbl.to_crs(g_proj.graph['crs'])
-        
+    # Layer: aeroways
+    if runways_rot is not None and not runways_rot.empty: 
         # Many airports in OSM are mapped as LineStrings (the centerline of the runway) rather than Polygons (the actual tarmac)
         # We need to handle both
-        rmkbl_polys = rmkbl_proj[rmkbl_proj.geometry.type.isin(["Polygon", "MultiPolygon"])].copy()
-        rmkbl_lines = rmkbl_proj[rmkbl_proj.geometry.type.isin(["LineString", "MultiLineString"])].copy()
+        runways_polys = runways_rot[runways_rot.geometry.type.isin(["Polygon", "MultiPolygon"])].copy()
+        runways_lines = runways_rot[runways_rot.geometry.type.isin(["LineString", "MultiLineString"])].copy()
         
         airway_color = THEME.get("aeroway", THEME["road_motorway"])  # see if aeroway color is defined, else fall back on road_motorway
         
         # Render Polygons (Runway surfaces)
-        if not rmkbl_polys.empty:
+        if not runways_polys.empty:
             #large_runways = rmkbl_polys[rmkbl_polys.length > 200]
-            rmkbl_polys.plot(ax=ax, 
+            runways_polys.plot(ax=ax, 
                         facecolor=airway_color, 
                         edgecolor=airway_color,  # Set edge color to match to avoid 'background' bleed
                         linewidth=0.5, 
                         zorder=5)
         
         # Render Lines (Taxiways or Runway described as LineStrings)           
-        if not rmkbl_lines.empty:
+        if not runways_lines.empty:
             # Calculate Scale: How many meters per Matplotlib point?
             x_range = crop_xlim[1] - crop_xlim[0]
             fig_width_inches = fig.get_size_inches()[0]
@@ -726,11 +792,11 @@ def create_poster(
                 # Increase the visibility floor to 0.8
                 return max(val * m_to_pt_ratio, 0.8)
             
-            rmkbl_lines.loc[:, 'lw_pt'] = rmkbl_lines.apply(calculate_linewidth, axis=1)
+            runways_lines.loc[:, 'lw_pt'] = runways_lines.apply(calculate_linewidth, axis=1)
             
             # 2. Plotting
             # Slightly higher in zorder than polygons to avoid flickering
-            for _, row in rmkbl_lines.iterrows():
+            for _, row in runways_lines.iterrows():
                 lw = row['lw_pt']
                 geom = row.geometry
                 a_type = row.get('aeroway', 'unknown')
@@ -748,43 +814,47 @@ def create_poster(
                         x, y = line.xy
                         ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
 
-    # Layer 4: railways                                           
-    if railways is not None and not rmkbl.empty:
+    # Layer: railways                                           
+    if railways_rot is not None and not railways_rot.empty:
         railway_color = THEME.get("railway", THEME["road_secondary"])  # see if railway color is defined, else fall back on road_secondary
-        # Convert to GeoDataFrame
-        _, g_rail_edges = ox.graph_to_gdfs(ox.project_graph(railways))
-        # Render using GeoPandas (Faster)
-        g_rail_edges.plot(ax=ax, 
+        railways_rot.plot(ax=ax, 
                         color=railway_color, 
                         linewidth=0.6, 
                         linestyle=(0, (5, 2)), # Dashed line for classic railway look
                         zorder=2.5)
     
-    # Layer 5: Roads with hierarchy coloring
+    # Layer: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
-    edge_colors = get_edge_colors_by_type(g_proj)
-    edge_widths = get_edge_widths_by_type(g_proj)
+    edge_colors = get_edge_colors_by_type(g_rotated)
+    edge_widths = get_edge_widths_by_type(g_rotated)
 
     # Plot the projected graph and then apply the cropped limits
+    
     ox.plot_graph(
-        g_proj, ax=ax, bgcolor=THEME['bg'],
+        g_rotated, 
+        ax=ax, 
+        bgcolor=THEME['bg'],
         node_size=0,
         edge_color=edge_colors,
         edge_linewidth=edge_widths,
         show=False,
         close=False,
     )
+    
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
 
-    # Layer 6: Gradients (Top and Bottom)
+    # Layer: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
     create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
 
     ax.set_aspect("equal", adjustable="box")
     if show_north:
         draw_north_badge(ax, orientation_offset, THEME["text"])
+
+    # -------------
+    # 6. Text
 
     # Calculate scale factor based on smaller dimension (reference 12 inches)
     # This ensures text scales properly for both portrait and landscape orientations
@@ -796,7 +866,7 @@ def create_poster(
     base_coords = 14
     base_attr = 8
 
-    # 4. Typography - use custom fonts if provided, otherwise use default FONTS
+    # Typography - use custom fonts if provided, otherwise use default FONTS
     active_fonts = fonts or FONTS
     if active_fonts:
         # font_main is calculated dynamically later based on length
@@ -923,7 +993,8 @@ def create_poster(
         zorder=11,
     )
 
-    # 5. Save
+    # -------------
+    # 7. Save
     print(f"Saving to {output_file}...")
 
     fmt = output_format.lower()

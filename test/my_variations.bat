@@ -38,7 +38,8 @@ py -m pip install -r requirements.txt
 ::py create_map_poster.py -c "Brest" -C "France" -t mohe_subaraya_light -d 18000 -iO -iR
 
 
-::py create_map_poster.py -c "Changi Airport" -C "Singapore" -t grand_prix -d 30000 --font-family "Montserrat" -iO
+py create_map_poster.py -c "Changi Airport" -C "Singapore" -t terracotta -d 30000 -O 45
+py create_map_poster.py -c "Changi Airport" -C "Singapore" -t terracotta -d 30000
 ::py create_map_poster.py -c "Warszawa" -C "Polska" -t grand_prix -d 60000 --font-family "Brygada 1918"
 
 ::py create_map_poster.py -c "SPA-Francorchamps" -C "Belgium" -t grand_prix_dimmed -d 6000 --show-north -O -90 --font-family "Russo One" --hide-north

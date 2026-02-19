@@ -2,13 +2,14 @@
 Rotation Management adapted as a Module from https://github.com/juandesant/maptoposter/
 """
 
+import argparse
 import colorsys
 import numpy as np
 import osmnx as ox
 from pathlib import Path
 import matplotlib.colors as mcolors
 import xml.etree.ElementTree as ET
-
+from geopandas import GeoDataFrame
 from matplotlib.patches import Polygon
 from shapely import affinity
 from shapely.geometry import Point
@@ -222,7 +223,7 @@ def draw_north_badge(ax, orientation_offset, main_color):
             xytext=(cx, cy),
             arrowprops={
                 "arrowstyle": "-|>",
-                "color": THEME["text"],
+                "color": main_color,
                 "linewidth": 1.2,
                 "shrinkA": 0,
                 "shrinkB": 0,
@@ -279,58 +280,69 @@ def get_projected_center(g_proj, center_lat_lon):
     return center.x, center.y
 
 
-def rotate_graph_and_features(g_proj, features, center_lat_lon, orientation_offset):
-    """
-    Rotate graph and feature layers around the map center.
-
-    Positive user values are interpreted clockwise relative to north.
-    Shapely's positive angle is counter-clockwise, so we negate the value.
-    """
-    if orientation_offset == 0:
+def rotate_graph_and_features(g_proj, features, center_lat_lon, angle):
+    if angle == 0:
         return g_proj, features
-
+        
+    # Get center in projected coordinates
     center_x, center_y = get_projected_center(g_proj, center_lat_lon)
-    angle_ccw = -orientation_offset
-
+    angle_ccw = -angle  # Convert clockwise offset to counter-clockwise for Shapely
+    
+    # 1. Rotate Graph Nodes
     g_rotated = g_proj.copy()
-    cos_theta = np.cos(np.deg2rad(angle_ccw))
-    sin_theta = np.sin(np.deg2rad(angle_ccw))
-
-    for _node, data in g_rotated.nodes(data=True):
-        x = data.get("x")
-        y = data.get("y")
-        if x is None or y is None:
-            continue
-        dx = x - center_x
-        dy = y - center_y
-        data["x"] = center_x + (dx * cos_theta - dy * sin_theta)
-        data["y"] = center_y + (dx * sin_theta + dy * cos_theta)
-
-    for _u, _v, _k, data in g_rotated.edges(keys=True, data=True):
-        geom = data.get("geometry")
-        if geom is not None:
-            data["geometry"] = affinity.rotate(
-                geom,
-                angle_ccw,
-                origin=(center_x, center_y),
-                use_radians=False,
+    for node, data in g_rotated.nodes(data=True):
+        p = Point(data['x'], data['y'])
+        p_rot = affinity.rotate(p, angle_ccw, origin=(center_x, center_y))
+        data['x'], data['y'] = p_rot.x, p_rot.y
+    
+    # 2. IMPORTANT: ROTATE EVERY EDGE GEOMETRY (Crucial for roads/railways)
+    # If we only rotate nodes, OSMnx's plotting functions will still draw the original unrotated 
+    # road shapes between the new node positions.
+    for u, v, k, data in g_rotated.edges(data=True, keys=True):
+        if 'geometry' in data:
+            data['geometry'] = affinity.rotate(
+                data['geometry'], 
+                angle_ccw, 
+                origin=(center_x, center_y)
             )
 
+    # Rotate GeoDataFrames
     rotated_features = []
     for gdf in features:
         if gdf is None or gdf.empty:
             rotated_features.append(gdf)
             continue
-        gdf_rotated = gdf.copy()
-        gdf_rotated["geometry"] = gdf_rotated.geometry.apply(
-            lambda geom: affinity.rotate(
-                geom,
-                angle_ccw,
-                origin=(center_x, center_y),
-                use_radians=False,
-            )
-        )
-        rotated_features.append(gdf_rotated)
-
+        
+        # Use GeoPandas rotate method (angle is degrees, origin is (x, y))
+        # Note: Negate angle if you want clockwise vs counter-clockwise correction
+        gdf_rot = gdf.copy()
+        gdf_rot['geometry'] = gdf.geometry.rotate(-angle, origin=(center_x, center_y))
+        rotated_features.append(gdf_rot)
+        
     return g_rotated, rotated_features
 
+    if angle == 0:
+        return g_proj, features
+        
+    # Get center in projected coordinates
+    center_x, center_y = get_projected_center(g_proj, center_lat_lon)
+    angle_ccw = -angle  # Convert clockwise offset to counter-clockwise for Shapely
+    
+    # Rotate Graph
+    g_rot = ox.projection.project_graph(g_proj, to_latlong=False) # Ensure we stay in meters
+    # (Apply rotation to g_rot nodes here)
+    
+    # Rotate GeoDataFrames
+    rotated_gdfs = []
+    for gdf in features:
+        if gdf is None or gdf.empty:
+            rotated_gdfs.append(gdf)
+            continue
+        
+        # Use GeoPandas rotate method (angle is degrees, origin is (x, y))
+        # Note: Negate angle if you want clockwise vs counter-clockwise correction
+        gdf_rot = gdf.copy()
+        gdf_rot['geometry'] = gdf.geometry.rotate(-angle, origin=(center_x, center_y))
+        rotated_gdfs.append(gdf_rot)
+        
+    return g_rot, rotated_gdfs
