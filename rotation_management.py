@@ -6,6 +6,7 @@ import argparse
 import colorsys
 import numpy as np
 import osmnx as ox
+import networkx as nx
 from pathlib import Path
 import matplotlib.colors as mcolors
 import xml.etree.ElementTree as ET
@@ -308,41 +309,51 @@ def rotate_graph_and_features(g_proj, features, center_lat_lon, angle):
 
     # Rotate GeoDataFrames
     rotated_features = []
-    for gdf in features:
-        if gdf is None or gdf.empty:
-            rotated_features.append(gdf)
+    for item in features:
+        # CASE A: Handle None or empty items early
+        if item is None:
+            rotated_features.append(None)
             continue
-        
-        # Use GeoPandas rotate method (angle is degrees, origin is (x, y))
-        # Note: Negate angle if you want clockwise vs counter-clockwise correction
-        gdf_rot = gdf.copy()
-        gdf_rot['geometry'] = gdf.geometry.rotate(-angle, origin=(center_x, center_y))
-        rotated_features.append(gdf_rot)
-        
-    return g_rotated, rotated_features
 
-    if angle == 0:
-        return g_proj, features
-        
-    # Get center in projected coordinates
-    center_x, center_y = get_projected_center(g_proj, center_lat_lon)
-    angle_ccw = -angle  # Convert clockwise offset to counter-clockwise for Shapely
-    
-    # Rotate Graph
-    g_rot = ox.projection.project_graph(g_proj, to_latlong=False) # Ensure we stay in meters
-    # (Apply rotation to g_rot nodes here)
-    
-    # Rotate GeoDataFrames
-    rotated_gdfs = []
-    for gdf in features:
-        if gdf is None or gdf.empty:
-            rotated_gdfs.append(gdf)
-            continue
-        
-        # Use GeoPandas rotate method (angle is degrees, origin is (x, y))
-        # Note: Negate angle if you want clockwise vs counter-clockwise correction
-        gdf_rot = gdf.copy()
-        gdf_rot['geometry'] = gdf.geometry.rotate(-angle, origin=(center_x, center_y))
-        rotated_gdfs.append(gdf_rot)
-        
-    return g_rot, rotated_gdfs
+       # CASE B: Handle GeoDataFrames (Parks, Water, etc.)
+        if isinstance(item, GeoDataFrame):
+            if item.empty:
+                rotated_features.append(item)
+                continue
+            
+            gdf_rot = item.copy()
+            gdf_rot["geometry"] = gdf_rot.geometry.apply(
+                lambda geom: affinity.rotate(
+                    geom, angle_ccw, origin=(center_x, center_y)
+                )
+            )
+            rotated_features.append(gdf_rot)
+
+        # CASE C: Handle MultiDiGraphs (Railways)
+        elif isinstance(item, (nx.MultiDiGraph, nx.Graph)):
+            if not item: # Check if graph is empty (0 nodes)
+                rotated_features.append(item)
+                continue
+                
+            g_item_rot = item.copy()
+            # Rotate nodes
+            for _, data in g_item_rot.nodes(data=True):
+                p = Point(data['x'], data['y'])
+                p_rot = affinity.rotate(p, angle_ccw, origin=(center_x, center_y))
+                data['x'], data['y'] = p_rot.x, p_rot.y
+            
+            # Rotate edge geometries
+            for _, _, _, data in g_item_rot.edges(data=True, keys=True):
+                if 'geometry' in data:
+                    data['geometry'] = affinity.rotate(
+                        data['geometry'], 
+                        angle_ccw, 
+                        origin=(center_x, center_y)
+                    )
+            rotated_features.append(g_item_rot)
+            
+        else:
+            # Unknown type, just pass it through
+            rotated_features.append(item)
+
+    return g_rotated, rotated_features

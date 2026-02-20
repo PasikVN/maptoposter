@@ -242,7 +242,7 @@ def get_edge_widths_by_type(g):
 
         # Assign width based on road importance
         if highway in ["raceway"]:
-            width = 4
+            width = 1.5
         elif highway in ["motorway", "motorway_link"]:
             width = 1.2
         elif highway in ["trunk", "trunk_link", "primary", "primary_link"]:
@@ -488,13 +488,13 @@ def fetch_graph(point, dist, ntype='all') -> MultiDiGraph | None:
         return cast(MultiDiGraph, cached)
 
     try:           
-        print(f"OSMnx fetching graph: {ntype}")
+        print(f"\nOSMnx fetching graph: {ntype}")
         g_all = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type=ntype, truncate_by_edge=True)
         
         custom_filter = '["highway"~"raceway|service|track"]'
         g_race = ox.graph_from_point(point, dist=dist, custom_filter=custom_filter)
-
-        g = nx.compose(g_all, g_race) 
+      
+        g = nx.compose(g_all, g_race)
         
         # Rate limit between requests
         time.sleep(0.5)
@@ -546,6 +546,39 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
         return None
 
 
+def safe_project(data, target_crs):
+    """
+    Safely projects either a GeoDataFrame or an OSMnx MultiDiGraph to the target CRS.
+    To be used after fetch_features -> GeoDataFrame or after fetch_graph -> MultiDiGraph
+    """
+    if data is None:
+        return None
+        
+    # Handle GeoDataFrames (as you currently do)
+    if isinstance(data, GeoDataFrame):
+        if data.empty:
+            return None
+        try:
+            return ox.projection.project_gdf(data, to_crs=target_crs)
+        except Exception:
+            try:
+                return data.to_crs(target_crs)
+            except Exception:
+                return None
+
+    # Handle MultiDiGraph
+    if isinstance(data, (nx.MultiDiGraph, nx.Graph)):
+        if not data:  # Tests if the graph has 0 nodes
+            return None
+        try:
+            # OSMnx provides a specific function for projecting graphs
+            return ox.projection.project_graph(data, to_crs=target_crs)
+        except Exception:
+            return None
+
+    return None
+
+
 def create_poster(
     city,
     country,
@@ -559,7 +592,6 @@ def create_poster(
     display_country=None,
     fonts=None,
     fast_mode=False,
-    include_oceans=True,
     include_railways=False,
     orientation_offset=0.0,
     show_north=False,
@@ -583,7 +615,6 @@ def create_poster(
         display_city: Optional override for city name
         fonts:
         fast_mode:
-        include_oceans: adds ocean and sea mass
         include_railways: draw railways if defined in theme
 
     Raises:
@@ -675,26 +706,25 @@ def create_poster(
                 '["service"!~"yard|spur"]'
                 )
             railways = ox.graph_from_point(point, 
-                                fetch_dist,  
-                                custom_filter=rail_filter, 
+                                fetch_dist,
+                                custom_filter=rail_filter,
                                 retain_all=True,
                                 simplify=False) # Some railways disapear if set to true (ex: Hué, Vietnam)
-            
         else:
             pbar.set_description("Downloading railways skiped")
             railways=None
         pbar.update(1)
-
-    print("✔ All data retrieved successfully!")
+    
+    print("\n✔ All data retrieved successfully!")
 
     # -------------
     # 2. Setup Plot
-    print("Rendering map...")
     fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME["bg"])
     ax.set_facecolor(THEME["bg"])
     ax.set_position((0.0, 0.0, 1.0, 1.0))
 
     # Project graph to a metric CRS so distances and aspect are linear (meters)
+    print("Projecting features to CRS...")
     g_proj = ox.project_graph(g)
 
     # Determine cropping limits to maintain the poster aspect ratio
@@ -703,13 +733,6 @@ def create_poster(
 
     # Project everything to the same CRS first
     crs = g_proj.graph['crs']
-
-    def safe_project(gdf, target_crs):
-        if gdf is None or gdf.empty: return None
-        try: return ox.projection.project_gdf(gdf, to_crs=target_crs)
-        except Exception:
-            try: return gdf.to_crs(target_crs)
-            except Exception: return None
             
     water_proj = safe_project(water, crs)
     parks_proj = safe_project(parks, crs)
@@ -719,6 +742,7 @@ def create_poster(
 
     # -------------
     # 3. Rotate everything IN ONE GO
+    print("Rotating...")
     features_to_rotate = [water_proj, coastline_proj, parks_proj, runways_proj, railways_proj]
     g_rotated, rotated_list = rotate_graph_and_features(g_proj, features_to_rotate, point, orientation_offset)
     # Re-assign variables from the ROTATED list
@@ -729,26 +753,35 @@ def create_poster(
     # un-clipped lines), we ensure the water correctly fills the gaps created by the rotation.
     # Use the original crop_xlim/ylim so the sea fills the final view
     # Note: The sea_polys should be built AFTER the rotation.
+    print("Building sea polygons...")
     sea_polys = build_sea_polygons(coastline_rot, g_rotated, crop_xlim, crop_ylim, point)
 
     # -------------
     # 5. Plot the ROTATED variables
+    print("Plotting...")
     if sea_polys is not None:
-        sea_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.4)
+        print("....seas/oceans")
+        sea_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=1)
     if water_rot is not None:
-        water_rot.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.4)
+        print("....water")
+        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots like fountains, private backyard pond,...
+        water_polys = water_rot[water_rot.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not water_polys.empty:
+            water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=1)
 
     # Layer: parks 
     if parks_rot is not None and not parks_rot.empty:
+        print("....parks")
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
-        parks_polys = parks_rot[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        parks_polys = parks_rot[parks_rot.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
-            parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
+            parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=2)
 
     # Layer: aeroways
     if runways_rot is not None and not runways_rot.empty: 
         # Many airports in OSM are mapped as LineStrings (the centerline of the runway) rather than Polygons (the actual tarmac)
         # We need to handle both
+        print("....aeroways")
         runways_polys = runways_rot[runways_rot.geometry.type.isin(["Polygon", "MultiPolygon"])].copy()
         runways_lines = runways_rot[runways_rot.geometry.type.isin(["LineString", "MultiLineString"])].copy()
         
@@ -761,7 +794,7 @@ def create_poster(
                         facecolor=airway_color, 
                         edgecolor=airway_color,  # Set edge color to match to avoid 'background' bleed
                         linewidth=0.5, 
-                        zorder=5)
+                        zorder=3)
         
         # Render Lines (Taxiways or Runway described as LineStrings)           
         if not runways_lines.empty:
@@ -814,33 +847,44 @@ def create_poster(
                         x, y = line.xy
                         ax.plot(x, y, color=airway_color, linewidth=lw, solid_capstyle='butt', zorder=5.1)
 
-    # Layer: railways                                           
-    if railways_rot is not None and not railways_rot.empty:
+    # Layer: railways (⚠ railways like roads are graphs)                                           
+    if railways_rot is not None and len(railways_rot.edges) > 0:
+        print("....railways")
         railway_color = THEME.get("railway", THEME["road_secondary"])  # see if railway color is defined, else fall back on road_secondary
-        railways_rot.plot(ax=ax, 
+        # Convert railways MultiDiGraph to GeoDataFrame
+        _, railways_rot_gdf = ox.graph_to_gdfs(railways_rot)
+        railways_rot_gdf.plot(ax=ax, 
                         color=railway_color, 
                         linewidth=0.6, 
                         linestyle=(0, (5, 2)), # Dashed line for classic railway look
-                        zorder=2.5)
+                        zorder=4)
     
     # Layer: Roads with hierarchy coloring
-    print("Applying road hierarchy colors...")
+    print("....Roads (with hierarchy colors)")
     edge_colors = get_edge_colors_by_type(g_rotated)
     edge_widths = get_edge_widths_by_type(g_rotated)
 
-    # Plot the projected graph and then apply the cropped limits
-    
+    # Plot the projected graph
+    # Convert road graph from OSMNX to GeoDataFrame for faster plotting
+    #_, roads_rot_gdf = ox.graph_to_gdfs(g_rotated)
+    #roads_rot_gdf.plot(ax=ax, color=edge_colors, linewidth=edge_widths, linestyle='solid', zorder=6)
+
     ox.plot_graph(
-        g_rotated, 
-        ax=ax, 
-        bgcolor=THEME['bg'],
+        g_rotated, ax=ax, bgcolor=THEME['bg'],
         node_size=0,
         edge_color=edge_colors,
         edge_linewidth=edge_widths,
         show=False,
-        close=False,
+        close=False
     )
-    
+
+    # # FORCE Matplotlib to flush the dashed cache from the railway layer
+    # #ax.collections[-1] grabs the very last thing plotted (the roads)
+    # if ax.collections:
+    #     ax.collections[-1].set_linestyle('solid')
+    #     ax.collections[-1].set_dashes([(0, None)]) # Completely clears the dash pattern
+
+    # Apply the cropped limits
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
@@ -1054,8 +1098,8 @@ Examples:
   # i18n support with custom display names
   python create_map_poster.py -c "Tokyo" -C "Japan" -dc "東京" -dC "日本" --font-family "Noto Sans JP" -t japanese_ink
   
-  # example of rotation with north arrow
-  python create_map_poster.py -c "SPA-Francorchamps" -C "Belgium" -t grand_prix -d 6000 --show-north -O -90 --font-family "Russo One"
+  # example of rotation 90deg with north arrow
+  python create_map_poster.py -c "SPA-Francorchamps" -C "Belgium" -t grand_prix -d 6000 --font-family "Russo One" -O -90
   
   # List themes
   python create_map_poster.py --list-themes
@@ -1074,12 +1118,10 @@ Options:
   --format, -f                Output format for the poster ('png', 'svg', 'pdf') (default: png)
   --fonts                     Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.
   --fast                      Fast mode: fetches only driving roads (faster but less detailed)
-  --include-oceans, -iO       Render oceans and seas
   --include-railways, -iR     Render railways
   --orientation-offset, -O    Rotation of the map (Allowed range: `-180` to `180`)
-  --show-north                Enables the compass badge (true|false)  `false` when `--orientation-offset` is 0 else `true`
-  --hide-north                forces compass badge off
-
+  --show-north                Show the north badge (even if orientation =0). If not set, will not show. Will automatially show if <> 0 but could be forced hidden with --no-show-north)
+  --no-show-north             North badge is forced hidden
   
 Distance guide:
   4000-6000m   Small/dense cities (Venice, Amsterdam old center)
@@ -1133,124 +1175,92 @@ Examples:
 
     parser.add_argument("--city", "-c", type=str, help="City name")
     parser.add_argument("--country", "-C", type=str, help="Country name")
-    parser.add_argument(
-        "--latitude",
+    parser.add_argument("--latitude",
         "-lat",
         dest="latitude",
         type=str,
         help="Override latitude center point",
     )
-    parser.add_argument(
-        "--longitude",
+    parser.add_argument("--longitude",
         "-long",
         dest="longitude",
         type=str,
         help="Override longitude center point",
     )
-    parser.add_argument(
-        "--theme",
+    parser.add_argument("--theme",
         "-t",
         type=str,
         default="terracotta",
         help="Theme name (default: terracotta)",
     )
-    parser.add_argument(
-        "--all-themes",
+    parser.add_argument("--all-themes",
         "--All-themes",
         dest="all_themes",
         action="store_true",
         help="Generate posters for all themes",
     )
-    parser.add_argument(
-        "--distance",
+    parser.add_argument("--distance",
         "-d",
         type=int,
         default=18000,
         help="Map radius in meters (default: 18000)",
     )
-    parser.add_argument(
-        "--width",
+    parser.add_argument("--width",
         "-W",
         type=float,
         default=12,
         help="Image width in inches (default: 12, max: 20 )",
     )
-    parser.add_argument(
-        "--height",
+    parser.add_argument("--height",
         "-H",
         type=float,
         default=16,
         help="Image height in inches (default: 16, max: 20)",
     )
-    parser.add_argument(
-        "--list-themes", action="store_true", help="List all available themes"
-    )
-    parser.add_argument(
-        "--display-city",
+    parser.add_argument("--list-themes", action="store_true", help="List all available themes")
+    parser.add_argument("--display-city",
         "-dc",
         type=str,
         help="Custom display name for city (for i18n support)",
     )
-    parser.add_argument(
-        "--display-country",
+    parser.add_argument("--display-country",
         "-dC",
         type=str,
         help="Custom display name for country (for i18n support)",
     )
-    parser.add_argument(
-        "--font-family",
+    parser.add_argument("--font-family",
         type=str,
         help='Google Fonts family name (e.g., "Noto Sans JP", "Open Sans"). If not specified, uses local Roboto fonts.',
     )
-    parser.add_argument(
-        "--format",
+    parser.add_argument("--format",
         "-f",
         default="png",
         choices=["png", "svg", "pdf"],
         help="Output format for the poster (default: png)",
     )
-    parser.add_argument(
-        "--fast",
+    parser.add_argument("--fast",
         dest="fast_mode",
         action="store_true",
         help="Fast mode: fetches only driving roads (faster but less detailed)",
     )
-    parser.add_argument(
-        "--include-oceans",
-        "-iO",
-        dest="include_oceans",
-        action="store_true",
-        help="Enable automatic ocean/sea filling based on coastlines",
-    )
-    parser.set_defaults(include_oceans=True)
-    parser.add_argument(
-        "--include-railways",
+    parser.add_argument("--include-railways",
         "-iR",
         dest="include_railways",
         action="store_true",
         help="Enable railways rendering",
     )
     parser.set_defaults(include_railways=False)
-    parser.add_argument(
-        "--orientation-offset",
+    parser.add_argument("--orientation-offset",
         "-O",
+        dest="orientation_offset",
         type=float,
         default=0.0,
         help="Map orientation offset in degrees relative to north (clockwise positive, range: -180 to 180)",
     )
-    parser.add_argument(
-        "--show-north",
-        nargs="?",
-        const=True,
-        default=None,
-        type=parse_bool_arg,
-        metavar="true/false",
-        help="Show north badge. If omitted, defaults to true when --orientation-offset != 0, else false.",
-    )
-    parser.add_argument(
-        "--hide-north",
-        action="store_true",
-        help="Hide north badge (overrides --show-north).",
+    parser.add_argument("--show-north", 
+        dest="show_north",
+        action=argparse.BooleanOptionalAction,
+        help="Show the north badge (even if orientation =0). If not set, will not show. Will automatially show if <> 0 but could be forced hidden with --no-show-north)",
     )
 
     args = parser.parse_args()
@@ -1287,12 +1297,14 @@ Examples:
             f"Error: --orientation-offset must be between -180 and 180. Received {args.orientation_offset}."
         )
         sys.exit(1)
-    if args.hide_north:
-        show_north = False
-    elif args.show_north is None:
+
+    if args.show_north: # if set then show badge
+        show_north = True
+    elif args.show_north is None: # if not set, then show badge only if orientation <> 0
         show_north = args.orientation_offset != 0
-    else:
-        show_north = args.show_north
+        print(f"show_north not defined, set to {show_north} based on orientation_offset {args.orientation_offset}")
+    else:  # if arg is --no-show-north, then  args.show_north is false.
+        show_north = False
 
     available_themes = get_available_themes()
     if not available_themes:
@@ -1345,7 +1357,6 @@ Examples:
                 display_country=args.display_country,
                 fonts=custom_fonts,
                 fast_mode=args.fast_mode,
-                include_oceans=args.include_oceans,
                 include_railways=args.include_railways,
                 orientation_offset=args.orientation_offset,
                 show_north=show_north,

@@ -87,8 +87,9 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
 | **OPTIONAL:** `--format` | `-f` | Output format for the poster ('png', 'svg', 'pdf') | `png` |
 | **OPTIONAL:** `--fast` | | Fast mode: fetches only driving roads (faster but less detailed) | false |
-| **OPTIONAL:** `--include-oceans` | `-iO` | Render oceans and seas | true |
 | **OPTIONAL:** `--include-railways` | `-iR` | Render railways | false |
+| **OPTIONAL:** `--show-north` | | Show the north badge (even if orientation =0). If not set, will not show. Will automatially show if <> 0 but could be forced hidden with --no-show-north) | |
+| **OPTIONAL:** `--no-show-north` | | North badge is forced hidden | |
 
 #### Rotation Flags
 - `--orientation-offset` (short: `-O`)
@@ -258,6 +259,7 @@ python create_map_poster.py -c "Tokyo" -C "Japan" --all-themes
 | `autumn` | Seasonal burnt oranges and reds |
 | `copper_patina` | Oxidized copper aesthetic |
 | `monochrome_blue` | Single blue color family |
+| `grand_prix` | High-contrast racing theme with midnight navy background and vibrant red track |
 
 ## Output
 
@@ -285,7 +287,10 @@ Create a JSON file in `themes/` directory:
   "road_secondary": "#2A2A2A",
   "road_tertiary": "#3A3A3A",
   "road_residential": "#4A4A4A",
-  "road_default": "#3A3A3A"
+  "road_default": "#3A3A3A",
+  "railway": "#763b1f",
+  "road_raceway": "#a02d38",
+  "aeroway": "#612f18"
 }
 ```
 
@@ -343,13 +348,14 @@ Quick reference for contributors who want to extend or modify the script.
 | `load_theme()` | JSON theme → dict | Adding new theme properties |
 | `is_latin_script()` | Detects script for typography | Supporting new scripts |
 | `load_fonts()` | Load custom/default fonts | Changing font loading logic |
-
 ### Rendering Layers (z-order)
 
 ```text
 z=11  Text labels (city, country, coords)
 z=10  Gradient fades (top & bottom)
-z=3   Roads (via ox.plot_graph)
+z=6   Roads (via ox.plot_graph)
+z=4   Railways
+z=3   Aeorways 
 z=2   Parks (green polygons)
 z=1   Water (blue polygons)
 z=0   Background color
