@@ -34,7 +34,7 @@ from tqdm import tqdm
 
 # App modules
 from font_management import load_fonts
-from rotation_management import rotate_graph_and_features, draw_north_badge, parse_bool_arg
+from rotation_management import rotate_graph_and_features, draw_north_badge
 from cache_management import cache_get, cache_set, CacheError
 
 ox.settings.use_cache=True

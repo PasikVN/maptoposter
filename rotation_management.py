@@ -61,22 +61,6 @@ def create_gradient_fade(ax, color, location="bottom", zorder=10):
     )
 
 
-def parse_bool_arg(value: str) -> bool:
-    """
-    Parse CLI boolean values from common true/false strings.
-    """
-    normalized = value.strip().lower()
-    truthy = {"true", "1", "yes", "y", "on"}
-    falsy = {"false", "0", "no", "n", "off"}
-    if normalized in truthy:
-        return True
-    if normalized in falsy:
-        return False
-    raise argparse.ArgumentTypeError(
-        f"Invalid boolean value '{value}'. Use true/false."
-    )
-
-
 def _parse_svg_points(points_str):
     """
     Parse SVG polygon point lists into numeric (x, y) tuples.
