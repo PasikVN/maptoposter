@@ -43,9 +43,9 @@ if %ERRORLEVEL% NEQ 0 goto :error_handler
 @REM py create_map_poster.py -c "Changi Airport" -C "Singapore" -t pastel_dream -d 30000 --font-family "Montserrat" -iR -O 45 --no-show-north
 @REM if %ERRORLEVEL% NEQ 0 goto :error_handler
 
-@REM :: testing RACEWAYS
-@REM py create_map_poster.py -c "Circuit de la Sarthe, Le Mans" -C "France" -t pastel_dream -d 15000  --font-family "Russo One" -iR
-@REM if %ERRORLEVEL% NEQ 0 goto :error_handler
+:: testing RACEWAYS
+py create_map_poster.py -c "Circuit de la Sarthe, Le Mans" -dc "LE MANS" -C "France" -t pastel_dream -d 15000  --font-family "Michroma" -iR
+if %ERRORLEVEL% NEQ 0 goto :error_handler
 
 @REM :: testing RACEWAYS, LAT/LONG
 @REM py create_map_poster.py -c "Nürburgring" -C "Germany" -t grand_prix_dimmed -d 15000 --font-family "Russo One" -lat 50.34765 -long 6.96651
@@ -55,9 +55,9 @@ if %ERRORLEVEL% NEQ 0 goto :error_handler
 @REM py create_map_poster.py -c "Nürburgring" -C "Germany" -t grand_prix_dimmed -d 15000 --font-family "Russo One" -lat 50.34765 -long 6.96651 -O 25
 @REM if %ERRORLEVEL% NEQ 0 goto :error_handler
 
-:: Testing WIDTH/HEIGHT
-py create_map_poster.py -c "Ho Chi Minh city" -dc "Thành phố Hồ Chí Minh" -C "Vietnam" -dC "Việt Nam" -t mohe_subaraya_light -d 40000 -iR --font-family "Playfair Display" -W 16 -H 12
-if %ERRORLEVEL% NEQ 0 goto :error_handler
+@REM :: Testing WIDTH/HEIGHT
+@REM py create_map_poster.py -c "Ho Chi Minh city" -dc "Thành phố Hồ Chí Minh" -C "Vietnam" -dC "Việt Nam" -t mohe_subaraya_light -d 40000 -iR --font-family "Playfair Display" -W 16 -H 12
+@REM if %ERRORLEVEL% NEQ 0 goto :error_handler
 
 
 

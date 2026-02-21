@@ -227,33 +227,87 @@ def get_edge_colors_by_type(g):
     return edge_colors
 
 
-def get_edge_widths_by_type(g):
+def compute_line_width_scale(
+    distance_m: float,
+    G,                     # the MultiDiGraph from OSMnx
+    min_scale: float = 0.55,
+    max_scale: float = 1.80,
+    reference_distance: float = 12000.0,
+) -> float:
+    """
+    Compute a global line width multiplier based on:
+      - Requested distance (larger area → thinner lines by default)
+      - Actual graph density (more edges per area → thinner lines to reduce clutter)
+    
+    Returns value typically in 0.55–1.8 range.
+    """
+    if G is None or G.number_of_edges() == 0:
+        return 1.0  # fallback
+
+    # ── Part 1: distance-based base scale (inverse)
+    # smaller radius → expect denser → allow slightly bolder lines
+    dist_factor = reference_distance / max(distance_m, 2000.0)
+    
+    # soften the curve a bit (avoids extreme changes)
+    dist_factor = dist_factor ** 0.75
+    
+    # ── Part 2: real density penalty
+    # rough area in km² (very approximate, assumes circular)
+    radius_km = distance_m / 1000.0
+    approx_area_km2 = 3.1416 * (radius_km ** 2)
+    
+    edges = G.number_of_edges()
+    density = edges / max(approx_area_km2, 0.1)   # edges per km²
+    
+    # Typical "comfortable" density for posters ~ 800–1800 edges/km²
+    # above that → start thinning
+    target_density = 1200.0
+    density_factor = target_density / max(density, 200.0)
+    
+    # combine (geometric mean = balanced influence)
+    combined = (dist_factor * density_factor) ** 0.5
+    
+    # final clamping — prevents unusable extremes
+    scale = max(min_scale, min(max_scale, combined))
+    
+    return scale
+
+
+def get_edge_widths_by_type(g, distance):
     """
     Assigns line widths to edges based on road type.
     Major roads get thicker lines.
     """
+    # Calculate the base thickness for a standard residential road
+    width_scale = compute_line_width_scale(distance,g)
+
+    edge_width_dict = {
+                        "motorway":          1.50 * width_scale,
+                        "motorway_link":     1.35 * width_scale,
+                        "trunk":             1.15 * width_scale,
+                        "primary":           1.00 * width_scale,
+                        "secondary":         0.80 * width_scale,
+                        "tertiary":          0.60 * width_scale,
+                        "residential":       0.40 * width_scale,
+                        "living_street":     0.38 * width_scale,
+                        "service":           0.32 * width_scale,
+                        "unclassified":      0.35 * width_scale,
+                        "footway":           0.22 * width_scale,   # if you plot them
+                        "path":              0.18 * width_scale,
+                        "railway":           0.55 * width_scale,   # if included
+                        "raceway":           1.00 * width_scale,   # if included
+                        "default":           0.35 * width_scale,
+                    }
+    
     edge_widths = []
 
-    for _u, _v, data in g.edges(data=True):
-        highway = data.get('highway', 'unclassified')
+    for u, v, key in g.edges(keys=True):  # or G.edges() if no keys needed
+        highway = g[u][v][key].get("highway", "default")  # sometimes it's a list → take first
 
         if isinstance(highway, list):
-            highway = highway[0] if highway else 'unclassified'
-
-        # Assign width based on road importance
-        if highway in ["raceway"]:
-            width = 1.5
-        elif highway in ["motorway", "motorway_link"]:
-            width = 1.2
-        elif highway in ["trunk", "trunk_link", "primary", "primary_link"]:
-            width = 1.0
-        elif highway in ["secondary", "secondary_link"]:
-            width = 0.8
-        elif highway in ["tertiary", "tertiary_link"]:
-            width = 0.6
-        else:
-            width = 0.4
-
+            highway = highway[0] if highway else 'default'
+        
+        width = edge_width_dict.get(highway, edge_width_dict["default"])
         edge_widths.append(width)
 
     return edge_widths
@@ -756,18 +810,21 @@ def create_poster(
     print("Building sea polygons...")
     sea_polys = build_sea_polygons(coastline_rot, g_rotated, crop_xlim, crop_ylim, point)
 
+    edge_colors = get_edge_colors_by_type(g_rotated)
+    edge_widths = get_edge_widths_by_type(g_rotated, dist)
+
     # -------------
     # 5. Plot the ROTATED variables
     print("Plotting...")
     if sea_polys is not None:
         print("....seas/oceans")
-        sea_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=1)
+        sea_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
     if water_rot is not None:
         print("....water")
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots like fountains, private backyard pond,...
         water_polys = water_rot[water_rot.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not water_polys.empty:
-            water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=1)
+            water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
 
     # Layer: parks 
     if parks_rot is not None and not parks_rot.empty:
@@ -775,7 +832,7 @@ def create_poster(
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         parks_polys = parks_rot[parks_rot.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
-            parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=2)
+            parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
 
     # Layer: aeroways
     if runways_rot is not None and not runways_rot.empty: 
@@ -793,8 +850,8 @@ def create_poster(
             runways_polys.plot(ax=ax, 
                         facecolor=airway_color, 
                         edgecolor=airway_color,  # Set edge color to match to avoid 'background' bleed
-                        linewidth=0.5, 
-                        zorder=3)
+                        linewidth=0.6, 
+                        zorder=2)
         
         # Render Lines (Taxiways or Runway described as LineStrings)           
         if not runways_lines.empty:
@@ -855,14 +912,12 @@ def create_poster(
         _, railways_rot_gdf = ox.graph_to_gdfs(railways_rot)
         railways_rot_gdf.plot(ax=ax, 
                         color=railway_color, 
-                        linewidth=0.6, 
+                        linewidth=edge_widths,  # Slightly thinner than roads to avoid overpowering the map
                         linestyle=(0, (5, 2)), # Dashed line for classic railway look
-                        zorder=4)
+                        zorder=2.5)
     
     # Layer: Roads with hierarchy coloring
     print("....Roads (with hierarchy colors)")
-    edge_colors = get_edge_colors_by_type(g_rotated)
-    edge_widths = get_edge_widths_by_type(g_rotated)
 
     # Plot the projected graph
     # Convert road graph from OSMNX to GeoDataFrame for faster plotting
