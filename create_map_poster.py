@@ -600,7 +600,7 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
         return None
 
 
-def safe_project(data, target_crs):
+def safe_project(data, target_crs, tolerance=1.0):
     """
     Safely projects either a GeoDataFrame or an OSMnx MultiDiGraph to the target CRS.
     To be used after fetch_features -> GeoDataFrame or after fetch_graph -> MultiDiGraph
@@ -613,7 +613,9 @@ def safe_project(data, target_crs):
         if data.empty:
             return None
         try:
-            return ox.projection.project_gdf(data, to_crs=target_crs)
+            gdf = ox.projection.project_gdf(data, to_crs=target_crs)
+            gdf['geometry'] = gdf.simplify(tolerance, preserve_topology=True)
+            return gdf
         except Exception:
             try:
                 return data.to_crs(target_crs)
@@ -689,6 +691,7 @@ def create_poster(
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
     ) as pbar:
+        start_fetch_time = time.perf_counter()
         compensated_dist = dist * (max(height, width) / min(height, width))/4 # To compensate for viewport crop
 
         # Since we are rotating a rectangle, the corners of your poster will "swing" out of the original north-up square. 
@@ -770,6 +773,8 @@ def create_poster(
         pbar.update(1)
     
     print("\n✔ All data retrieved successfully!")
+    end_fetch_time = time.perf_counter()
+    print(f"    ⏱️ in {end_fetch_time - start_fetch_time:.2f}s")
 
     # -------------
     # 2. Setup Plot
@@ -788,11 +793,11 @@ def create_poster(
     # Project everything to the same CRS first
     crs = g_proj.graph['crs']
             
-    water_proj = safe_project(water, crs)
-    parks_proj = safe_project(parks, crs)
-    runways_proj = safe_project(runways, crs)
-    railways_proj = safe_project(railways, crs)
-    coastline_proj = safe_project(coastline, crs)
+    water_proj = safe_project(water, crs, tolerance=2)
+    parks_proj = safe_project(parks, crs, tolerance=2)  
+    runways_proj = safe_project(runways, crs) 
+    railways_proj = safe_project(railways, crs, tolerance=0.5)
+    coastline_proj = safe_project(coastline, crs, tolerance=2)
 
     # -------------
     # 3. Rotate everything IN ONE GO
@@ -802,6 +807,8 @@ def create_poster(
     # Re-assign variables from the ROTATED list
     water_rot, coastline_rot, parks_rot, runways_rot, railways_rot = rotated_list
 
+    end_rotate_time = time.perf_counter()
+    print(f"    ⏱️ in {end_rotate_time - end_fetch_time:.2f}s")
     # -------------
     # 4. Build Sea Polygons using the ROTATED coordinate system and the coastline_rot (which contains the rotated, 
     # un-clipped lines), we ensure the water correctly fills the gaps created by the rotation.
@@ -939,6 +946,8 @@ def create_poster(
     #     ax.collections[-1].set_linestyle('solid')
     #     ax.collections[-1].set_dashes([(0, None)]) # Completely clears the dash pattern
 
+    end_plot_time = time.perf_counter()
+    print(f"    ⏱️ in {end_plot_time - end_rotate_time:.2f}s")
     # Apply the cropped limits
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
@@ -1215,6 +1224,9 @@ def list_themes():
 
 
 if __name__ == "__main__":
+
+    start_time = time.perf_counter()
+
     parser = argparse.ArgumentParser(
         description="Generate beautiful map posters for any city",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1421,6 +1433,9 @@ Examples:
         print("✔ Poster generation complete!")
         print("=" * 50)
 
+        end_time = time.perf_counter()
+        print(f"⏱️ Total time taken: {end_time - start_time:.2f} seconds")
+        
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
