@@ -789,7 +789,8 @@ def create_poster(
                     fetch_dist,
                     tags={
                         "historic": ["castle", "fort", "fortress"],
-                        "building": ["castle", "fortress"]
+                        "castle_type": ["fortress", "citadel"],
+                        "defensive_works":["moat", "bastion", "crownwork"]
                     },
                     name="historic")
             except ox._errors.InsufficientResponseError:
@@ -797,7 +798,7 @@ def create_poster(
             
             try:
                 walls_filter = (
-                    '["historic"~"fortification|castle_wall|citywalls"]'
+                    '["historic"~"fortification|castle_wall|citywalls|defensive_works"]'
                     '["barrier"~"city_wall"]'
                     )
                 historic_walls = ox.graph_from_point(point, 
@@ -805,14 +806,6 @@ def create_poster(
                                     custom_filter=walls_filter,
                                     retain_all=True,
                                     simplify=False)
-                # historic_walls = fetch_features(
-                #     point,
-                #     fetch_dist,
-                #     tags={
-                #         "historic": [ "fortification", "castle_wall", "citywalls"],
-                #         "barrier": "city_wall"
-                #     },
-                #     name="historic")
             except ox._errors.InsufficientResponseError:
                 historic_walls=None
         else:
@@ -981,7 +974,7 @@ def create_poster(
         historics_polys = historics_rot[historics_rot.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not historics_polys.empty:
             historics_polys.plot(ax=ax, 
-                                 facecolor=THEME["parks"], # fill the citadells/castles like a prk but outline it with the chosen color
+                                 facecolor=THEME["parks"], # fill the citadels/castles like a prk but outline it with the chosen color
                                  edgecolor=THEME.get("historic", THEME["text"]),  # if historic is non-existant fall back to text colorto diferentiate from roads
                                  linewidth=0.2,
                                  zorder=0.9) # Just above parks
