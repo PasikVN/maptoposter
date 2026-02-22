@@ -27,9 +27,9 @@ cls
 
 
 :: =======================  TESTS ============================
-:: Testing special font, UTF-8 and city/country forced naming with railways
-py create_map_poster.py -c "Tokyo" -C "Japan" -dc "東京" -dC "日本" --font-family "Noto Sans JP" -t japanese_ink -d 40000 -iR
-if %ERRORLEVEL% NEQ 0 goto :error_handler
+@REM :: Testing special font, UTF-8 and city/country forced naming with railways
+@REM py create_map_poster.py -c "Tokyo" -C "Japan" -dc "東京" -dC "日本" --font-family "Noto Sans JP" -t japanese_ink -d 40000 -iR
+@REM if %ERRORLEVEL% NEQ 0 goto :error_handler
 
 @REM :: testing ROAD/RAILWAYS/AEROWAYS (this will test caching): -iR should be defined first because when cached it will not load railways when fetch for the 2nd time)
 @REM py create_map_poster.py -c "Changi Airport" -C "Singapore" -t pastel_dream -d 30000 --font-family "Montserrat" -iR
@@ -43,9 +43,9 @@ if %ERRORLEVEL% NEQ 0 goto :error_handler
 @REM py create_map_poster.py -c "Changi Airport" -C "Singapore" -t pastel_dream -d 30000 --font-family "Montserrat" -iR -O 45 --no-show-north
 @REM if %ERRORLEVEL% NEQ 0 goto :error_handler
 
-:: testing RACEWAYS
-py create_map_poster.py -c "Circuit de la Sarthe, Le Mans" -dc "LE MANS" -C "France" -t pastel_dream -d 15000  --font-family "Michroma" -iR
-if %ERRORLEVEL% NEQ 0 goto :error_handler
+@REM :: testing RACEWAYS
+@REM py create_map_poster.py -c "Circuit de la Sarthe, Le Mans" -dc "LE MANS" -C "France" -t pastel_dream -d 15000  --font-family "Michroma" -iR
+@REM if %ERRORLEVEL% NEQ 0 goto :error_handler
 
 @REM :: testing RACEWAYS, LAT/LONG
 @REM py create_map_poster.py -c "Nürburgring" -C "Germany" -t grand_prix_dimmed -d 15000 --font-family "Russo One" -lat 50.34765 -long 6.96651
@@ -59,7 +59,9 @@ if %ERRORLEVEL% NEQ 0 goto :error_handler
 @REM py create_map_poster.py -c "Ho Chi Minh city" -dc "Thành phố Hồ Chí Minh" -C "Vietnam" -dC "Việt Nam" -t mohe_subaraya_light -d 40000 -iR --font-family "Playfair Display" -W 16 -H 12
 @REM if %ERRORLEVEL% NEQ 0 goto :error_handler
 
-
+:: testing ???
+py create_map_poster.py -c "Saint-Martin-de-Ré" -C "France" -t warm_beige -d 5000  --font-family "IM Fell English SC" -iR -iH
+if %ERRORLEVEL% NEQ 0 goto :error_handler
 
 echo.
 echo ====================================================

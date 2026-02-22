@@ -649,6 +649,7 @@ def create_poster(
     fonts=None,
     fast_mode=False,
     include_railways=False,
+    include_historic_features=False,
     orientation_offset=0.0,
     show_north=False,
 ):
@@ -686,7 +687,7 @@ def create_poster(
     # -------------
     # 1. Data fetching (with progress bar)
     with tqdm(
-        total=6,
+        total=7,
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -740,7 +741,11 @@ def create_poster(
         parks = fetch_features(
             point,
             fetch_dist,
-            tags={"leisure": "park", "landuse": ["grass", "cemetery"], "natural": "wood"},
+            tags={"leisure": "park", 
+                  "landuse": ["grass", "cemetery"], 
+                  "natural": "wood",
+                  "barrier": "ditch"
+                },
             name="parks",
         )
         pbar.update(1)
@@ -762,14 +767,58 @@ def create_poster(
                 '["railway"~"rail|light_rail|narrow_gauge|monorail|subway|tram|preserved"]'
                 '["service"!~"yard|spur"]'
                 )
-            railways = ox.graph_from_point(point, 
-                                fetch_dist,
-                                custom_filter=rail_filter,
-                                retain_all=True,
-                                simplify=False) # Some railways disapear if set to true (ex: Hué, Vietnam)
+            try:
+                railways = ox.graph_from_point(point, 
+                                    fetch_dist,
+                                    custom_filter=rail_filter,
+                                    retain_all=True,
+                                    simplify=False) # Some railways disapear if set to true (ex: Hué, Vietnam)
+            except ox._errors.InsufficientResponseError:
+                railways=None  # Return empty GeoDataFrame if no result (could happen if none of the feature matches)
         else:
             pbar.set_description("Downloading railways skiped")
             railways=None
+        pbar.update(1)
+
+        # 1.7 Fetch historic landmarks
+        if include_historic_features:
+            pbar.set_description("Downloading historic landmarks")
+            try:
+                historic_features = fetch_features(
+                    point,
+                    fetch_dist,
+                    tags={
+                        "historic": ["castle", "fort", "fortress"],
+                        "building": ["castle", "fortress"]
+                    },
+                    name="historic")
+            except ox._errors.InsufficientResponseError:
+                historic_features=None
+            
+            try:
+                walls_filter = (
+                    '["historic"~"fortification|castle_wall|citywalls"]'
+                    '["barrier"~"city_wall"]'
+                    )
+                historic_walls = ox.graph_from_point(point, 
+                                    fetch_dist,
+                                    custom_filter=walls_filter,
+                                    retain_all=True,
+                                    simplify=False)
+                # historic_walls = fetch_features(
+                #     point,
+                #     fetch_dist,
+                #     tags={
+                #         "historic": [ "fortification", "castle_wall", "citywalls"],
+                #         "barrier": "city_wall"
+                #     },
+                #     name="historic")
+            except ox._errors.InsufficientResponseError:
+                historic_walls=None
+        else:
+            pbar.set_description("Downloading historic landmarks skiped")
+            historic_features=None
+            historic_walls=None
         pbar.update(1)
     
     print("\n✔ All data retrieved successfully!")
@@ -798,14 +847,16 @@ def create_poster(
     runways_proj = safe_project(runways, crs) 
     railways_proj = safe_project(railways, crs, tolerance=0.5)
     coastline_proj = safe_project(coastline, crs, tolerance=2)
+    historics_proj = safe_project(historic_features, crs)
+    historic_walls = safe_project(historic_walls, crs)
 
     # -------------
     # 3. Rotate everything IN ONE GO
     print("Rotating...")
-    features_to_rotate = [water_proj, coastline_proj, parks_proj, runways_proj, railways_proj]
+    features_to_rotate = [water_proj, coastline_proj, parks_proj, runways_proj, railways_proj, historics_proj, historic_walls]
     g_rotated, rotated_list = rotate_graph_and_features(g_proj, features_to_rotate, point, orientation_offset)
     # Re-assign variables from the ROTATED list
-    water_rot, coastline_rot, parks_rot, runways_rot, railways_rot = rotated_list
+    water_rot, coastline_rot, parks_rot, runways_rot, railways_rot, historics_rot, historic_walls_rot = rotated_list
 
     end_rotate_time = time.perf_counter()
     print(f"    ⏱️ in {end_rotate_time - end_fetch_time:.2f}s")
@@ -923,6 +974,25 @@ def create_poster(
                         linestyle=(0, (5, 2)), # Dashed line for classic railway look
                         zorder=2.5)
     
+    # Layer: historic landmarks 
+    if historics_rot is not None and not historics_rot.empty:
+        print("....historic landmarks")
+        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
+        historics_polys = historics_rot[historics_rot.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not historics_polys.empty:
+            historics_polys.plot(ax=ax, 
+                                 facecolor=THEME["parks"], # fill the citadells/castles like a prk but outline it with the chosen color
+                                 edgecolor=THEME.get("historic", THEME["text"]),  # if historic is non-existant fall back to text colorto diferentiate from roads
+                                 linewidth=0.2,
+                                 zorder=0.9) # Just above parks
+
+    if historic_walls_rot is not None and len(historic_walls_rot.edges) > 0:
+        _, historic_walls_rot_gdf = ox.graph_to_gdfs(historic_walls_rot)
+        historic_walls_rot_gdf.plot(ax=ax, 
+                                 color=THEME.get("historic", THEME["text"]), # Same as above, the walls use historic and is non-existant fall back to text colorto diferentiate from roads
+                                 linewidth=1.2,
+                                 zorder=7) # Plot above parks and water, similar to major roads
+            
     # Layer: Roads with hierarchy coloring
     print("....Roads (with hierarchy colors)")
 
@@ -1317,6 +1387,13 @@ Examples:
         help="Enable railways rendering",
     )
     parser.set_defaults(include_railways=False)
+    parser.add_argument("--include-historics",
+        "-iH",
+        dest="include_historic_features",
+        action="store_true",
+        help="Enable historic landmarks rendering",
+    )
+    parser.set_defaults(include_historic_features=False)
     parser.add_argument("--orientation-offset",
         "-O",
         dest="orientation_offset",
@@ -1425,6 +1502,7 @@ Examples:
                 fonts=custom_fonts,
                 fast_mode=args.fast_mode,
                 include_railways=args.include_railways,
+                include_historic_features=args.include_historic_features,
                 orientation_offset=args.orientation_offset,
                 show_north=show_north,
             )

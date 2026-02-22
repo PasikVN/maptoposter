@@ -14,5 +14,6 @@
   "road_default": "#D9A08A",
   "railway": "#763b1f",
   "road_raceway": "#a02d38",
-  "aeroway": "#612f18"
+  "aeroway": "#612f18",
+  "historic": "#8B4513"
 }
